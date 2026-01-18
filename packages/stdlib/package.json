@@ -14,6 +14,7 @@
         "@repo/eslint-config": "workspace:*",
         "@repo/typescript-config": "workspace:*",
         "@types/node": "^20.10.0",
+        "@webgpu/types": "^0.1.69",
         "eslint": "^9.39.1",
         "typescript": "5.9.2"
     },
