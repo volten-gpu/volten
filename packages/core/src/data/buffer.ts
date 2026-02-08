@@ -6,9 +6,12 @@ import { type TypeDescriptor, resolveType, getWgslType } from '../types/schema.j
 import { pack, getStride } from '../utils/alignment.js';
 
 /**
- * Buffer access mode
- * - "r": Read-only storage buffer (storage, read)
- * - "rw": Read-write storage buffer (storage, read_write)
+ * Buffer access mode (controls shader access, not CPU access)
+ * - "r": Storage buffer that shaders can only read
+ * - "rw": Storage buffer that shaders can read and write
+ * 
+ * Note: CPU can always write to the buffer via device.queue.writeBuffer()
+ * regardless of access mode — this is expected for updating constants.
  */
 export type BufferAccess = 'r' | 'rw';
 
