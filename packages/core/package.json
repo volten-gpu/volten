@@ -7,6 +7,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "test": "vitest",
+    "test:run": "vitest run",
     "lint": "eslint . --max-warnings 0",
     "check-types": "tsc --noEmit",
     "check-types:file": "tsc --noEmit --pretty false > tsc_output.txt 2>&1 || type tsc_output.txt"
