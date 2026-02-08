@@ -241,7 +241,7 @@ function packValue(
  * const vecs = pack([[1, 2, 3], [4, 5, 6]], "vec3f");
  * 
  * // Pack array of structs
- * const Particle = struct({ position: "vec3f", mass: "f32" });
+ * const Particle = struct("Particle", { position: "vec3f", mass: "f32" });
  * const particles = pack([
  *   { position: [0, 1, 2], mass: 1.0 },
  *   { position: [3, 4, 5], mass: 2.0 }

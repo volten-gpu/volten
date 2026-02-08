@@ -26,7 +26,7 @@ export type BufferAccess = 'r' | 'rw';
  * const positions = new Buffer([[0, 0, 0], [1, 1, 1]], "vec3f");
  * 
  * // Struct array
- * const Particle = struct({
+ * const Particle = struct("Particle", {
  *   position: "vec3f",
  *   velocity: "vec3f",
  *   mass: "f32",

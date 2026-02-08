@@ -27,8 +27,8 @@ export interface StructSchema {
     readonly fields: FieldInfo[];
     readonly size: number;
     readonly alignment: number;
-    /** Optional name for WGSL type generation */
-    readonly name?: string;
+    /** Name for WGSL type generation */
+    readonly name: string;
 }
 
 /**
@@ -86,15 +86,15 @@ export function resolveType(type: TypeDescriptor): ResolvedType {
  * Create a struct schema from field definitions
  * 
  * @example
- * const Particle = struct({
+ * const Particle = struct("Particle", {
  *   position: "vec3f",
  *   velocity: "vec3f",
  *   mass: "f32",
  * });
  */
 export function struct(
-    fields: Record<string, TypeDescriptor>,
-    name?: string
+    name: string,
+    fields: Record<string, TypeDescriptor>
 ): StructSchema {
     const fieldInfos: FieldInfo[] = [];
     let offset = 0;
@@ -167,11 +167,7 @@ export function getWgslType(type: TypeDescriptor): string {
     }
 
     if (type.kind === 'struct') {
-        if (type.name) {
-            return type.name;
-        }
-        // Anonymous struct - shouldn't be used directly in WGSL
-        throw new Error('Struct needs a name for WGSL type generation');
+        return type.name;
     }
 
     if (type.kind === 'array') {

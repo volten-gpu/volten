@@ -276,7 +276,7 @@ describe('Matrix Packing', () => {
 describe('Struct Schema', () => {
     describe('struct() creation', () => {
         it('creates a simple struct with correct layout', () => {
-            const Simple = struct({ x: 'f32', y: 'f32' });
+            const Simple = struct('Simple', { x: 'f32', y: 'f32' });
             expect(Simple.kind).toBe('struct');
             expect(Simple.fields).toHaveLength(2);
             expect(Simple.size).toBe(8);
@@ -284,7 +284,7 @@ describe('Struct Schema', () => {
         });
 
         it('calculates field offsets correctly', () => {
-            const Point = struct({ x: 'f32', y: 'f32', z: 'f32' });
+            const Point = struct('Point', { x: 'f32', y: 'f32', z: 'f32' });
             expect(Point.fields[0].offset).toBe(0);
             expect(Point.fields[1].offset).toBe(4);
             expect(Point.fields[2].offset).toBe(8);
@@ -292,7 +292,7 @@ describe('Struct Schema', () => {
 
         it('handles alignment padding between fields', () => {
             // f32 followed by vec3f: the vec3f needs 16-byte alignment
-            const Mixed = struct({
+            const Mixed = struct('Mixed', {
                 scalar: 'f32',   // 4 bytes at offset 0
                 vector: 'vec3f'  // needs 16-byte alignment, so offset 16
             });
@@ -301,14 +301,14 @@ describe('Struct Schema', () => {
             expect(Mixed.size).toBe(32); // 16 + 12 = 28, rounded up to 32 for alignment
         });
 
-        it('stores optional name', () => {
-            const Named = struct({ x: 'f32' }, 'MyStruct');
+        it('stores the name', () => {
+            const Named = struct('MyStruct', { x: 'f32' });
             expect(Named.name).toBe('MyStruct');
         });
     });
 
     describe('Particle struct (realistic use case)', () => {
-        const Particle = struct({
+        const Particle = struct('Particle', {
             position: 'vec3f',  // 12 bytes, 16-byte aligned -> offset 0
             velocity: 'vec3f',  // 12 bytes, 16-byte aligned -> offset 16
             mass: 'f32',        // 4 bytes, 4-byte aligned -> offset 28
@@ -357,12 +357,12 @@ describe('Struct Schema', () => {
     });
 
     describe('Nested structs', () => {
-        const AABB = struct({
+        const AABB = struct('AABB', {
             min: 'vec3f',
             max: 'vec3f',
         });
 
-        const Entity = struct({
+        const Entity = struct('Entity', {
             position: 'vec3f',
             bounds: AABB,
             id: 'u32',
@@ -443,7 +443,7 @@ describe('Array Schema', () => {
     });
 
     describe('struct with fixed-size array field', () => {
-        const GridCell = struct({
+        const GridCell = struct('GridCell', {
             neighbors: array('u32', 8),
             temperature: 'f32',
         });
@@ -516,10 +516,10 @@ describe('Utility Functions', () => {
         });
 
         it('returns correct stride for structs', () => {
-            const Simple = struct({ a: 'f32', b: 'f32' });
+            const Simple = struct('Simple', { a: 'f32', b: 'f32' });
             expect(getStride(Simple)).toBe(8);
 
-            const WithVec3 = struct({ v: 'vec3f' });
+            const WithVec3 = struct('WithVec3', { v: 'vec3f' });
             expect(getStride(WithVec3)).toBe(16);
         });
     });
@@ -540,7 +540,7 @@ describe('Utility Functions', () => {
         });
 
         it('resolves struct types', () => {
-            const S = struct({ x: 'vec3f' });
+            const S = struct('S', { x: 'vec3f' });
             const resolved = resolveType(S);
             expect(resolved.size).toBe(S.size);
             expect(resolved.alignment).toBe(S.alignment);
@@ -558,14 +558,9 @@ describe('Utility Functions', () => {
             expect(getWgslType('mat4x4f')).toBe('mat4x4f');
         });
 
-        it('returns named struct', () => {
-            const Named = struct({ x: 'f32' }, 'MyStruct');
+        it('returns struct name', () => {
+            const Named = struct('MyStruct', { x: 'f32' });
             expect(getWgslType(Named)).toBe('MyStruct');
-        });
-
-        it('throws for anonymous struct', () => {
-            const Anonymous = struct({ x: 'f32' });
-            expect(() => getWgslType(Anonymous)).toThrow();
         });
 
         it('returns array type string', () => {
@@ -608,7 +603,7 @@ describe('Edge Cases', () => {
     });
 
     it('handles missing struct fields (fills with zeros)', () => {
-        const Point = struct({ x: 'f32', y: 'f32', z: 'f32' });
+        const Point = struct('Point', { x: 'f32', y: 'f32', z: 'f32' });
         // Only provide x, missing y and z
         const packed = pack([{ x: 5.0 }], Point);
         const values = readFloats(packed, 3);
