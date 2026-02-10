@@ -39,6 +39,13 @@ export interface KernelOptions {
     /** 
      * Workgroup size for the compute shader.
      * Defaults to [64, 1, 1].
+     * ^ This default is not optimal for kernels that work in 2D spaces and
+     *   require frequent neighbor lookups like blur / stencil ops, I decided
+     *   however to keep this as an initial default and handle the optimal
+     *   workgroup size at the stdlib level, e.g. the author of a gaussianBlur 
+     *   kernel should use the correct workgroup size for that type of kernel.
+     *   Workgroup size is a compile-time, algorithmic concern. 
+     *   Dispatch dimensions are a runtime, data-shape concern
      * The shader will have @workgroup_size(x, y, z) injected.
      */
     workgroupSize?: [number, number?, number?];
