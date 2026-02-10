@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 import {
     Kernel,
     BUILTIN_SHORTHANDS,
+    WGSL_TYPE_ALIASES,
     expandParameter,
     expandParameterList,
     expandBuiltinShorthands,
@@ -117,6 +118,39 @@ describe('Builtin Shorthands', () => {
             expect(expandParameter('')).toBe('');
             expect(expandParameter('   ')).toBe('');
         });
+
+        it('expands gid with shorthand vec3u syntax', () => {
+            expect(expandParameter('gid: vec3u')).toBe(
+                '@builtin(global_invocation_id) gid: vec3u'
+            );
+        });
+
+        it('expands wid with shorthand vec3u syntax', () => {
+            expect(expandParameter('wid: vec3u')).toBe(
+                '@builtin(workgroup_id) wid: vec3u'
+            );
+        });
+
+        it('expands lid3 with shorthand vec3u syntax', () => {
+            expect(expandParameter('lid3: vec3u')).toBe(
+                '@builtin(local_invocation_id) lid3: vec3u'
+            );
+        });
+
+        it('expands nwg with shorthand vec3u syntax', () => {
+            expect(expandParameter('nwg: vec3u')).toBe(
+                '@builtin(num_workgroups) nwg: vec3u'
+            );
+        });
+
+        it('throws on wrong shorthand type for gid', () => {
+            expect(() => expandParameter('gid: vec3f')).toThrow(
+                /expects type "vec3<u32>"/
+            );
+            expect(() => expandParameter('gid: vec3i')).toThrow(
+                /expects type "vec3<u32>"/
+            );
+        });
     });
 
     describe('expandParameterList()', () => {
@@ -134,6 +168,18 @@ describe('Builtin Shorthands', () => {
 
         it('handles empty parameter list', () => {
             expect(expandParameterList('')).toBe('');
+        });
+
+        it('expands multiple shorthands with vec3u syntax', () => {
+            expect(expandParameterList('gid: vec3u, lid: u32')).toBe(
+                '@builtin(global_invocation_id) gid: vec3u, @builtin(local_invocation_index) lid: u32'
+            );
+        });
+
+        it('handles mixed shorthand syntax styles', () => {
+            expect(expandParameterList('gid: vec3u, wid: vec3<u32>')).toBe(
+                '@builtin(global_invocation_id) gid: vec3u, @builtin(workgroup_id) wid: vec3<u32>'
+            );
         });
     });
 
@@ -164,6 +210,24 @@ fn main(gid: vec3<u32>) { }
             }`;
             const result = expandBuiltinShorthands(source);
             expect(result).toContain('@builtin(global_invocation_id) gid: vec3<u32>');
+            expect(result).toContain('@builtin(local_invocation_index) lid: u32');
+            expect(result).toContain('@builtin(workgroup_id) wid: vec3<u32>');
+        });
+
+        it('expands shorthands with vec3u syntax in main function', () => {
+            const source = `fn main(gid: vec3u) {
+                output[gid.x] = input[gid.x];
+            }`;
+            const result = expandBuiltinShorthands(source);
+            expect(result).toContain('@builtin(global_invocation_id) gid: vec3u');
+        });
+
+        it('handles mixed shorthand syntax in parameter list', () => {
+            const source = `fn main(gid: vec3u, lid: u32, wid: vec3<u32>) {
+                // compute logic
+            }`;
+            const result = expandBuiltinShorthands(source);
+            expect(result).toContain('@builtin(global_invocation_id) gid: vec3u');
             expect(result).toContain('@builtin(local_invocation_index) lid: u32');
             expect(result).toContain('@builtin(workgroup_id) wid: vec3<u32>');
         });
@@ -308,6 +372,17 @@ fn main(gid: vec3<u32>) {
 
             expect(kernel.assembledSource).toContain('@compute @workgroup_size(128, 1, 1)');
             expect(kernel.assembledSource).toContain('@builtin(global_invocation_id) gid: vec3<u32>');
+        });
+
+        it('expands vec3u shorthands and injects decorators', () => {
+            const kernel = new Kernel(`
+fn main(gid: vec3u) {
+    output[gid.x] = input[gid.x];
+}
+`, { workgroupSize: [128] });
+
+            expect(kernel.assembledSource).toContain('@compute @workgroup_size(128, 1, 1)');
+            expect(kernel.assembledSource).toContain('@builtin(global_invocation_id) gid: vec3u');
         });
 
         it('caches assembled source', () => {
