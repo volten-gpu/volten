@@ -26,16 +26,6 @@ export const BUILTIN_SHORTHANDS: Record<string, { builtin: string; type: string 
 };
 
 /**
- * Regex to match function parameters in WGSL.
- * Captures: optional @builtin decorator, parameter name, and type.
- * 
- * Examples matched:
- *   "gid: vec3<u32>" → name="gid", type="vec3<u32>"
- *   "@builtin(global_invocation_id) gid: vec3<u32>" → already decorated, skip
- */
-const PARAM_REGEX = /(@builtin\([^)]+\)\s*)?([\w]+)\s*:\s*([\w<>]+)/g;
-
-/**
  * Regex to match the main function signature.
  * Captures the full "fn main(...)" block including parameters.
  */
