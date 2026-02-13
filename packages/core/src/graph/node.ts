@@ -1,6 +1,9 @@
 // Node and Handle types
 // Opaque handles for DAG nodes and their outputs
 
+import type { Kernel } from '../kernel/kernel.js';
+import type { BindingEntry } from '../kernel/bindings.js';
+
 /**
  * Handle to a buffer output from a compute pass.
  * Opaque type - users shouldn't inspect internal structure.
@@ -33,7 +36,11 @@ export interface Handle {
 // -----------------------------------------------------------------------------
 
 /** Reserved property names that cannot be used as output names */
-export const RESERVED_NODE_PROPERTIES = ['_id', '_dependencies', '_kernel'] as const;
+export const RESERVED_NODE_PROPERTIES = [
+    '_id', '_dependencies', '_kernel',
+    '_pipeline', '_bindGroupLayout', '_bindingEntries',
+    '_dispatch', '_bindings', '_shaderCode',
+] as const;
 
 /**
  * Validates that an output name doesn't conflict with internal properties.
@@ -63,7 +70,19 @@ export interface NodeBase {
     /** Dependencies (parent nodes providing inputs to this pass) */
     readonly _dependencies: readonly Node[];
     /** Reference to the kernel this node executes */
-    readonly _kernel: unknown; // Will be typed as Kernel once that module exists
+    readonly _kernel: Kernel;
+    /** The cached compute pipeline */
+    readonly _pipeline: GPUComputePipeline;
+    /** The bind group layout from the pipeline */
+    readonly _bindGroupLayout: GPUBindGroupLayout;
+    /** Classified binding entries (for v.run to create bind groups) */
+    readonly _bindingEntries: readonly BindingEntry[];
+    /** Dispatch dimensions [x, y, z] for workgroup dispatch */
+    readonly _dispatch: readonly [number, number, number];
+    /** Original user-provided bindings record (for Handle resolution at run time) */
+    readonly _bindings: Readonly<Record<string, unknown>>;
+    /** Full assembled shader code (for debugging) */
+    readonly _shaderCode: string;
 }
 
 /**
@@ -105,4 +124,57 @@ export function createHandle(node: Node, name: string): Handle {
         _node: node,
         _name: name,
     };
+}
+
+/**
+ * Options for creating a Node.
+ */
+export interface CreateNodeOptions {
+    kernel: Kernel;
+    pipeline: GPUComputePipeline;
+    bindGroupLayout: GPUBindGroupLayout;
+    bindingEntries: BindingEntry[];
+    dispatch: [number, number, number];
+    bindings: Record<string, unknown>;
+    shaderCode: string;
+    dependencies: Node[];
+}
+
+/**
+ * Create a Node with output handles spread directly onto it.
+ * 
+ * This is the primary factory for Node objects. It:
+ * 1. Creates the NodeBase with all internal properties
+ * 2. Creates a Handle for each kernel output
+ * 3. Spreads output handles directly onto the node
+ * 
+ * @param options - Node creation options
+ * @returns A fully constructed Node with output handles
+ */
+export function createNode(options: CreateNodeOptions): Node {
+    const {
+        kernel, pipeline, bindGroupLayout, bindingEntries,
+        dispatch, bindings, shaderCode, dependencies,
+    } = options;
+
+    // Create the base node object (mutated to add handles below)
+    const node: any = {
+        _id: Symbol('Node'),
+        _dependencies: Object.freeze(dependencies),
+        _kernel: kernel,
+        _pipeline: pipeline,
+        _bindGroupLayout: bindGroupLayout,
+        _bindingEntries: Object.freeze(bindingEntries),
+        _dispatch: Object.freeze(dispatch) as readonly [number, number, number],
+        _bindings: Object.freeze(bindings),
+        _shaderCode: shaderCode,
+    };
+
+    // Create and spread output handles onto the node
+    for (const output of kernel.outputs) {
+        const handle = createHandle(node as Node, output.name);
+        node[output.name] = handle;
+    }
+
+    return node as Node;
 }

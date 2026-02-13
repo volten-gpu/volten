@@ -19,11 +19,27 @@ export interface OutputConfig {
 /** Output declarations - simple array or detailed config */
 export type OutputsSpec = string[] | Record<string, OutputConfig>;
 
-/** Thread dispatch configuration */
+/**
+ * Specifies how many GPU threads to launch for a kernel.
+ *
+ * All forms express total invocations. Volten divides each axis by
+ * the corresponding workgroup dimension (with ceil) to compute dispatch size.
+ *
+ * - **number:** 1D invocation count, equivalent to [N, 1, 1].
+ * - **[x, y] or [x, y, z]:** Per-axis invocation counts.
+ * - **string:** Name of a binding whose element count determines the count (1D).
+ * - **function:** Dynamic — return number, [x,y], or [x,y,z].
+ *
+ * @example
+ * threads: 1024                           // → dispatch [ceil(1024/wgX), 1, 1]
+ * threads: [512, 512]                     // → dispatch [ceil(512/wgX), ceil(512/wgY), 1]
+ * threads: 'input'                        // → infer count from binding named "input"
+ * threads: (data) => data.input.count     // → dynamic 1D
+ */
 export type ThreadsSpec =
     | number                                                    // Simple 1D count
     | string                                                    // Infer from named input
-    | ((data: Record<string, unknown>) => [number, number, number]); // Dynamic
+    | ((data: Record<string, unknown>) => number | [number, number] | [number, number, number]); // Dynamic
 
 /**
  * Options for Kernel creation
