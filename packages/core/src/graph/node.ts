@@ -17,6 +17,21 @@ export interface Handle {
     readonly _name: string;
 }
 
+/**
+ * Type guard for Handle.
+ * Handles are objects with _id (symbol), _node, and _name properties.
+ */
+export function isHandle(value: unknown): value is Handle {
+    return (
+        typeof value === 'object' &&
+        value !== null &&
+        '_id' in value &&
+        '_node' in value &&
+        '_name' in value &&
+        typeof (value as Handle)._id === 'symbol'
+    );
+}
+
 // -----------------------------------------------------------------------------
 // Node Design Philosophy:
 // -----------------------------------------------------------------------------

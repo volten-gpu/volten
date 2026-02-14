@@ -32,8 +32,7 @@ import {
     assembleFullShader,
     resolveDispatch,
 } from './kernel/bindings.js';
-import { createNode, type Node } from './graph/node.js';
-import type { Handle } from './graph/node.js';
+import { createNode, type Node, type Handle, isHandle } from './graph/node.js';
 import { Buffer } from './data/buffer.js';
 import { RawBuffer } from './data/raw-buffer.js';
 
@@ -175,16 +174,4 @@ export class VoltenContext {
     }
 }
 
-/**
- * Type guard for Handle (duplicated from bindings.ts to avoid circular import)
- */
-function isHandle(value: unknown): value is Handle {
-    return (
-        typeof value === 'object' &&
-        value !== null &&
-        '_id' in value &&
-        '_node' in value &&
-        '_name' in value &&
-        typeof (value as Handle)._id === 'symbol'
-    );
-}
+

@@ -3,7 +3,7 @@
 
 import { Buffer } from '../data/buffer.js';
 import { RawBuffer } from '../data/raw-buffer.js';
-import type { Handle } from '../graph/node.js';
+import { type Handle, isHandle } from '../graph/node.js';
 import type { Kernel } from './kernel.js';
 
 /**
@@ -38,20 +38,7 @@ function isRawBuffer(value: unknown): value is RawBuffer {
     return value instanceof RawBuffer;
 }
 
-/**
- * Check if a value is a Handle from a previous node.
- * Handles are objects with _id (symbol), _node, and _name properties.
- */
-function isHandle(value: unknown): value is Handle {
-    return (
-        typeof value === 'object' &&
-        value !== null &&
-        '_id' in value &&
-        '_node' in value &&
-        '_name' in value &&
-        typeof (value as Handle)._id === 'symbol'
-    );
-}
+
 
 /**
  * Generate binding entries from user-provided bindings and kernel definition.
