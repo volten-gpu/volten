@@ -5,7 +5,6 @@ import { describe, it, expect } from 'vitest';
 import {
     Kernel,
     BUILTIN_SHORTHANDS,
-    WGSL_TYPE_ALIASES,
     expandParameter,
     expandParameterList,
     expandBuiltinShorthands,

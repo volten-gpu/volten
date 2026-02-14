@@ -15,6 +15,48 @@ export type MatrixType =
 export type PrimitiveType = ScalarType | VectorType | MatrixType;
 
 /**
+ * WGSL shorthand type aliases.
+ * Maps shorthand forms (e.g., vec3u) to their canonical generic forms (e.g., vec3<u32>).
+ * Covers vec2/3/4 × u32/i32/f32/f16 and mat variants.
+ */
+export const WGSL_TYPE_ALIASES: Record<string, string> = {
+    // vec2
+    vec2u: 'vec2<u32>',
+    vec2i: 'vec2<i32>',
+    vec2f: 'vec2<f32>',
+    vec2h: 'vec2<f16>',
+    // vec3
+    vec3u: 'vec3<u32>',
+    vec3i: 'vec3<i32>',
+    vec3f: 'vec3<f32>',
+    vec3h: 'vec3<f16>',
+    // vec4
+    vec4u: 'vec4<u32>',
+    vec4i: 'vec4<i32>',
+    vec4f: 'vec4<f32>',
+    vec4h: 'vec4<f16>',
+    // common matrix shorthands
+    mat2x2f: 'mat2x2<f32>',
+    mat2x3f: 'mat2x3<f32>',
+    mat2x4f: 'mat2x4<f32>',
+    mat3x2f: 'mat3x2<f32>',
+    mat3x3f: 'mat3x3<f32>',
+    mat3x4f: 'mat3x4<f32>',
+    mat4x2f: 'mat4x2<f32>',
+    mat4x3f: 'mat4x3<f32>',
+    mat4x4f: 'mat4x4<f32>',
+    mat2x2h: 'mat2x2<f16>',
+    mat2x3h: 'mat2x3<f16>',
+    mat2x4h: 'mat2x4<f16>',
+    mat3x2h: 'mat3x2<f16>',
+    mat3x3h: 'mat3x3<f16>',
+    mat3x4h: 'mat3x4<f16>',
+    mat4x2h: 'mat4x2<f16>',
+    mat4x3h: 'mat4x3<f16>',
+    mat4x4h: 'mat4x4<f16>',
+};
+
+/**
  * Type metadata: size in bytes and alignment in bytes
  */
 export interface TypeInfo {

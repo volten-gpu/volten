@@ -115,7 +115,10 @@ export class Kernel {
     /** The original user-provided WGSL source */
     readonly source: string;
 
-    /** Normalized output declarations */
+    /** 
+     * Normalized output declarations, object form { name, size } instead of record form:
+     * { "name": { size: ...} }
+     */
     readonly outputs: NormalizedOutput[];
 
     /** Workgroup size as [x, y, z] */
