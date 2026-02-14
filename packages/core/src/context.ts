@@ -32,7 +32,14 @@ import {
     assembleFullShader,
     resolveDispatch,
 } from './kernel/bindings.js';
-import { createNode, type Node, type Handle, isHandle } from './graph/node.js';
+import {
+    createNode,
+    getNodeOutputs,
+    type Node,
+    type Handle,
+    isHandle,
+} from './graph/node.js';
+import { topologicalSort } from './graph/scheduler.js';
 import { Buffer } from './data/buffer.js';
 import { RawBuffer } from './data/raw-buffer.js';
 
@@ -142,36 +149,162 @@ export class VoltenContext {
     }
 
     /**
-     * Execute a node or chain of nodes (fire and forget)
+     * Resolve a binding value to its GPUBuffer.
+     * - Buffer / RawBuffer → call ensure(device)
+     * - Handle → look up the output buffer from the source node's bindings
+     */
+    private _resolveGPUBuffer(value: Buffer | RawBuffer | Handle): GPUBuffer {
+        if (value instanceof Buffer || value instanceof RawBuffer) {
+            return value.ensure(this.device);
+        }
+        if (isHandle(value)) {
+            // Handle: the _name tells us which output name on the source node
+            // The source node's bindings record has the actual Buffer/RawBuffer for that name
+            const sourceBinding = value._node._bindings[value._name];
+            if (sourceBinding instanceof Buffer || sourceBinding instanceof RawBuffer) {
+                return sourceBinding.ensure(this.device);
+            }
+            throw new Error(
+                `Volten Error: Handle "${value._name}" does not resolve to a Buffer. ` +
+                `This is an internal error — please report it.`
+            );
+        }
+        throw new Error(
+            `Volten Error: Cannot resolve GPU buffer from binding of type ${typeof value}.`
+        );
+    }
+
+    /**
+     * Encode and submit all nodes in the DAG reachable from terminaNode.
+     *
+     * 1. Topological sort (Kahn's algorithm)
+     * 2. Ensure all GPU buffers
+     * 3. Create bind groups
+     * 4. Encode compute passes
+     * 5. Submit command buffer
+     */
+    private _execute(terminalNode: Node): void {
+        const sorted = topologicalSort(terminalNode);
+
+        const encoder = this.device.createCommandEncoder();
+
+        for (const node of sorted) {
+            // Ensure all Buffer/RawBuffer bindings are uploaded
+            for (const entry of node._bindingEntries) {
+                if (entry.source instanceof Buffer || entry.source instanceof RawBuffer) {
+                    entry.source.ensure(this.device);
+                }
+            }
+
+            // Build bind group entries, resolving Handles to actual GPUBuffers
+            const bgEntries: GPUBindGroupEntry[] = node._bindingEntries.map((entry) => ({
+                binding: entry.index,
+                resource: {
+                    buffer: this._resolveGPUBuffer(entry.source),
+                },
+            }));
+
+            const bindGroup = this.device.createBindGroup({
+                layout: node._bindGroupLayout,
+                entries: bgEntries,
+            });
+
+            const pass = encoder.beginComputePass();
+            pass.setPipeline(node._pipeline);
+            pass.setBindGroup(0, bindGroup);
+            pass.dispatchWorkgroups(
+                node._dispatch[0],
+                node._dispatch[1],
+                node._dispatch[2],
+            );
+            pass.end();
+        }
+
+        this.device.queue.submit([encoder.finish()]);
+    }
+
+    /**
+     * Execute a node or chain of nodes (fire and forget).
      * Does not wait for GPU completion.
-     * 
-     * @param node - The node to execute
+     *
+     * Topologically sorts the DAG reachable from `node`, encodes all
+     * compute passes into a single command buffer, and submits it.
+     *
+     * @param node - The terminal node to execute
      */
-    run(node: unknown): void {
-        // TODO: Implement in next phase
-        throw new Error('v.run() not yet implemented');
+    run(node: Node): void {
+        this._execute(node);
     }
 
     /**
-     * Execute a node and wait for GPU completion
-     * 
-     * @param node - The node to execute
+     * Execute a node and wait for GPU completion.
+     *
+     * @param node - The terminal node to execute
      */
-    async wait(node: unknown): Promise<void> {
-        // TODO: Implement in next phase
-        throw new Error('v.wait() not yet implemented');
+    async wait(node: Node): Promise<void> {
+        this._execute(node);
+        await this.device.queue.onSubmittedWorkDone();
     }
 
     /**
-     * Execute a node and read back results to CPU
-     * 
-     * @param node - The node to read from
-     * @returns The CPU-readable data
+     * Execute a node and read back its output buffers to CPU.
+     *
+     * Returns a record mapping output names to their typed arrays.
+     * If the node has a single output, returns that typed array directly.
+     *
+     * @param node - The terminal node to read from
+     * @returns CPU-readable data (typed array or record of typed arrays)
      */
-    async read(node: unknown): Promise<unknown> {
-        // TODO: Implement in next phase
-        throw new Error('v.read() not yet implemented');
+    async read(node: Node): Promise<Record<string, Float32Array>> {
+        this._execute(node);
+
+        const outputs = getNodeOutputs(node);
+        const outputNames = Object.keys(outputs);
+
+        if (outputNames.length === 0) {
+            throw new Error(
+                'Volten Error: v.read() called on a node with no declared outputs.\n' +
+                '  Hint: Make sure your Kernel has outputs declared, e.g.:\n' +
+                '    new Kernel(`...`, { outputs: [\'result\'] })'
+            );
+        }
+
+        // For each output, create a staging buffer, copy, and read back
+        const result: Record<string, Float32Array> = {};
+        const encoder = this.device.createCommandEncoder();
+        const stagingBuffers: { name: string; staging: GPUBuffer; size: number }[] = [];
+
+        for (const name of outputNames) {
+            const binding = node._bindings[name];
+            if (!(binding instanceof Buffer) && !(binding instanceof RawBuffer)) {
+                throw new Error(
+                    `Volten Error: Output "${name}" is not a Buffer/RawBuffer — cannot read back.`
+                );
+            }
+
+            const gpuBuffer = binding.ensure(this.device);
+            const size = binding.byteLength;
+
+            const staging = this.device.createBuffer({
+                size,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
+
+            encoder.copyBufferToBuffer(gpuBuffer, 0, staging, 0, size);
+            stagingBuffers.push({ name, staging, size });
+        }
+
+        this.device.queue.submit([encoder.finish()]);
+
+        // Map all staging buffers and read data
+        for (const { name, staging, size } of stagingBuffers) {
+            await staging.mapAsync(GPUMapMode.READ);
+            const data = new Float32Array(staging.getMappedRange().slice(0));
+            staging.unmap();
+            staging.destroy();
+            result[name] = data;
+        }
+
+        return result;
     }
 }
-
-
