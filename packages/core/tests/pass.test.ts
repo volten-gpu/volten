@@ -25,6 +25,7 @@ import {
     createHandle,
     validateOutputName,
     getNodeOutputs,
+    isBufferLike,
     type Handle,
     type Node,
 } from '../src/graph/node.js';
@@ -47,9 +48,13 @@ function makeRawBuffer(size: number = 16, type: string = 'array<f32>'): RawBuffe
     return new RawBuffer(new ArrayBuffer(size), type);
 }
 
-// Helper: create a minimal mock Handle
+// Helper: create a minimal mock Handle backed by a real Buffer
 function makeMockHandle(name: string = 'output'): Handle {
-    const fakeNode = { _id: Symbol('FakeNode') } as any;
+    const backingBuffer = makeBuffer([0], 'f32', 'r');
+    const fakeNode = {
+        _id: Symbol('FakeNode'),
+        _bindings: { [name]: backingBuffer },
+    } as any;
     return {
         _id: Symbol(`Handle:${name}`),
         _node: fakeNode,
@@ -95,13 +100,15 @@ describe('Binding Generation', () => {
             expect(entries[0].isHandle).toBe(false);
         });
 
-        it('classifies a Handle binding as read-only', () => {
+        it('classifies a Handle binding with resolved type from source', () => {
             const kernel = new Kernel('fn main() { }');
             const handle = makeMockHandle('prevOutput');
             const entries = generateBindings({ prevData: handle }, kernel);
 
             expect(entries).toHaveLength(1);
             expect(entries[0].name).toBe('prevData');
+            // Resolved from the backing buffer (f32, read-only)
+            expect(entries[0].wgslType).toBe('array<f32>');
             expect(entries[0].wgslAccess).toBe('read');
             expect(entries[0].isHandle).toBe(true);
         });
@@ -119,20 +126,20 @@ describe('Binding Generation', () => {
             expect(entries[2].index).toBe(2);
         });
 
-        it('throws on missing kernel output in bindings', () => {
+        it('does not throw when kernel outputs are not provided (outputs are optional hints)', () => {
             const kernel = new Kernel('fn main() { }', {
-                outputs: ['result'],
+                outputs: { result: { definedBy: 'input' } },
             });
             const input = makeBuffer([1, 2, 3], 'f32', 'r');
 
-            expect(() => generateBindings({ input }, kernel)).toThrow(
-                /Kernel declares output "result"/
-            );
+            // Should NOT throw — outputs are purely for future pool allocation
+            const entries = generateBindings({ input }, kernel);
+            expect(entries).toHaveLength(1);
         });
 
-        it('accepts when kernel output is provided', () => {
+        it('accepts when kernel output is provided along with its declaration', () => {
             const kernel = new Kernel('fn main() { }', {
-                outputs: ['result'],
+                outputs: { result: { definedBy: 'input' } },
             });
             const input = makeBuffer([1, 2, 3], 'f32', 'r');
             const result = makeBuffer([0, 0, 0], 'f32', 'rw');
@@ -363,7 +370,7 @@ describe('Thread Dispatch Resolution', () => {
                 'rw'
             );
             const kernel = new Kernel('fn main() { }', {
-                outputs: ['output'],
+                outputs: { output: { definedBy: 'input' } },
             });
             const dispatch = resolveDispatch(kernel, { input, output });
 
@@ -529,10 +536,10 @@ describe('Node Creation', () => {
         const mockPipeline = { label: 'mock' } as any as GPUComputePipeline;
         const mockLayout = { label: 'mock' } as any as GPUBindGroupLayout;
 
-        it('creates a node with output handles spread on it', () => {
-            const kernel = new Kernel('fn main() { }', {
-                outputs: ['result', 'debug'],
-            });
+        it('creates a node with handles for all buffer-like bindings', () => {
+            const kernel = new Kernel('fn main() { }');
+            const result = makeBuffer([0, 0, 0], 'f32', 'rw');
+            const debug = makeBuffer([0, 0, 0], 'f32', 'rw');
 
             const node = createNode({
                 kernel,
@@ -540,12 +547,12 @@ describe('Node Creation', () => {
                 bindGroupLayout: mockLayout,
                 bindingEntries: [],
                 dispatch: [1, 1, 1],
-                bindings: {},
+                bindings: { result, debug },
                 shaderCode: 'fn main() {}',
                 dependencies: [],
             });
 
-            // Output handles should be directly on the node
+            // Handles should be directly on the node for ALL buffer bindings
             expect(node.result).toBeDefined();
             expect(node.result._name).toBe('result');
             expect(node.debug).toBeDefined();
@@ -602,10 +609,8 @@ describe('Node Creation', () => {
             expect(childNode._dependencies[0]).toBe(parentNode);
         });
 
-        it('getNodeOutputs filters internal properties', () => {
-            const kernel = new Kernel('fn main() { }', {
-                outputs: ['result'],
-            });
+        it('does not create handles for non-buffer bindings', () => {
+            const kernel = new Kernel('fn main() { }');
 
             const node = createNode({
                 kernel,
@@ -619,8 +624,7 @@ describe('Node Creation', () => {
             });
 
             const outputs = getNodeOutputs(node);
-            expect(Object.keys(outputs)).toEqual(['result']);
-            expect(outputs.result._name).toBe('result');
+            expect(Object.keys(outputs)).toEqual([]);
         });
     });
 });
@@ -718,7 +722,7 @@ describe('VoltenContext.pass()', () => {
 fn main(gid: vec3u) {
     output[gid.x] = input[gid.x] * 2.0;
 }
-`, { outputs: ['output'], threads: 'input' });
+`, { outputs: { output: { definedBy: 'input' } }, threads: 'input' });
 
         const node = v.pass(kernel, { input, output });
 
@@ -736,16 +740,19 @@ fn main(gid: vec3u) {
         const output = makeBuffer([0, 0, 0, 0], 'f32', 'rw');
 
         const kernel = new Kernel('fn main(gid: vec3u) { }', {
-            outputs: ['output'],
+            outputs: { output: { definedBy: 'input' } },
             threads: 4,
         });
 
         const node = v.pass(kernel, { input, output });
 
-        // Output handle is directly on the node
+        // Handles are directly on the node for ALL buffer bindings
         expect(node.output).toBeDefined();
         expect(node.output._name).toBe('output');
         expect(node.output._node).toBe(node);
+        // Input buffer also gets a handle
+        expect(node.input).toBeDefined();
+        expect(node.input._name).toBe('input');
     });
 
     it('chains passes via Handle dependencies', () => {
@@ -756,11 +763,11 @@ fn main(gid: vec3u) {
         const result = makeBuffer([0, 0, 0, 0], 'f32', 'rw');
 
         const K1 = new Kernel('fn main(gid: vec3u) { }', {
-            outputs: ['mid'],
+            outputs: { mid: { definedBy: 'source' } },
             threads: 'source',
         });
         const K2 = new Kernel('fn main(gid: vec3u) { }', {
-            outputs: ['result'],
+            outputs: { result: { definedBy: 'data' } },
             threads: 4,
         });
 
@@ -819,7 +826,7 @@ fn main(gid: vec3u) {
 fn main(gid: vec3u) {
     output[gid.x] = input[gid.x];
 }
-`, { outputs: ['output'], threads: 2 });
+`, { outputs: { output: { definedBy: 'input' } }, threads: 2 });
 
         const node = v.pass(kernel, { input, output });
 
@@ -841,9 +848,8 @@ fn main(gid: vec3u) {
 
         const node = v.pass(kernel, { data });
 
-        // No output handles
         const outputs = getNodeOutputs(node);
-        expect(Object.keys(outputs)).toEqual([]);
+        expect(Object.keys(outputs)).toEqual(['data']);
     });
 
     it('handles multiple outputs', () => {
@@ -853,7 +859,7 @@ fn main(gid: vec3u) {
         const normal = makeBuffer([0, 0, 0], 'f32', 'rw');
 
         const kernel = new Kernel('fn main(gid: vec3u) { }', {
-            outputs: ['albedo', 'normal'],
+            outputs: { albedo: { definedBy: 'input' }, normal: { definedBy: 'input' } },
             threads: 'input',
         });
 
@@ -863,6 +869,60 @@ fn main(gid: vec3u) {
         expect(node.normal._name).toBe('normal');
 
         const outputs = getNodeOutputs(node);
-        expect(Object.keys(outputs).sort()).toEqual(['albedo', 'normal']);
+        // All buffer bindings get handles (input too)
+        expect(Object.keys(outputs).sort()).toEqual(['albedo', 'input', 'normal']);
+    });
+
+    it('creates handles for in-place buffer bindings without output declarations', () => {
+        const v = createMockVoltenContext();
+        const data = makeBuffer([1, 2, 3, 4], 'f32', 'rw');
+
+        // No outputs declared
+        const kernel = new Kernel('fn main(gid: vec3u) { }', {
+            threads: 4,
+        });
+
+        const A = v.pass(kernel, { data });
+
+        // Handle should still be available for the buffer binding
+        expect(A.data).toBeDefined();
+        expect(A.data._name).toBe('data');
+        expect(A.data._node).toBe(A);
+    });
+
+    it('enables in-place buffer chaining without output declarations', () => {
+        const v = createMockVoltenContext();
+        const buf = makeBuffer([1, 2, 3, 4], 'f32', 'rw');
+
+        const kernel = new Kernel('fn main(gid: vec3u) { }', {
+            threads: 4,
+        });
+
+        // Chain: A → B → C all modifying the same buffer in-place
+        const A = v.pass(kernel, { inout: buf });
+        const B = v.pass(kernel, { inout: A.inout });
+        const C = v.pass(kernel, { inout: B.inout });
+
+        // C should depend on B, which depends on A
+        expect(C._dependencies).toHaveLength(1);
+        expect(C._dependencies[0]._id).toBe(B._id);
+        expect(B._dependencies).toHaveLength(1);
+        expect(B._dependencies[0]._id).toBe(A._id);
+    });
+
+    it('Handle type resolves from source buffer (not hardcoded)', () => {
+        const v = createMockVoltenContext();
+        const positions = new Buffer([[1, 2, 3]], 'vec3f' as any, 'rw');
+
+        const kernel = new Kernel('fn main(gid: vec3u) { }', { threads: 1 });
+
+        const A = v.pass(kernel, { positions });
+        const B = v.pass(kernel, { data: A.positions });
+
+        // The binding entry for 'data' should have vec3f type from the source
+        const dataEntry = B._bindingEntries.find(e => e.name === 'data');
+        expect(dataEntry).toBeDefined();
+        expect(dataEntry!.wgslType).toBe('array<vec3f>');
+        expect(dataEntry!.wgslAccess).toBe('read_write');
     });
 });

@@ -93,8 +93,8 @@ describe('VoltenContext Execution', () => {
         const mid = new Buffer([0], 'f32');
         const output = new Buffer([0], 'f32');
 
-        const K1 = new Kernel('fn main() {}', { outputs: ['mid'] });
-        const K2 = new Kernel('fn main() {}', { outputs: ['output'] });
+        const K1 = new Kernel('fn main() {}', { outputs: { mid: { definedBy: 'input' } }, threads: 'input' });
+        const K2 = new Kernel('fn main() {}', { outputs: { output: { definedBy: 'data' } }, threads: 'data' });
 
         const A = v.pass(K1, { input, mid });
         const B = v.pass(K2, { data: A.mid, output });
@@ -110,7 +110,7 @@ describe('VoltenContext Execution', () => {
     it('v.wait() waits on work done', async () => {
         const input = new Buffer([1], 'f32');
         const output = new Buffer([0], 'f32');
-        const K = new Kernel('fn main() {}', { outputs: ['output'] });
+        const K = new Kernel('fn main() {}', { outputs: { output: { definedBy: 'input' } }, threads: 'input' });
         const node = v.pass(K, { input, output });
 
         await v.wait(node);
@@ -122,7 +122,7 @@ describe('VoltenContext Execution', () => {
     it('v.read() reads back outputs', async () => {
         const input = new Buffer([1], 'f32');
         const output = new Buffer([0], 'f32');
-        const K = new Kernel('fn main() {}', { outputs: ['output'] });
+        const K = new Kernel('fn main() {}', { outputs: { output: { definedBy: 'input' } }, threads: 'input' });
         const node = v.pass(K, { input, output });
 
         const result = await v.read(node);

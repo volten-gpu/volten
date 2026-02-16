@@ -41,20 +41,36 @@ function isRawBuffer(value: unknown): value is RawBuffer {
 
 
 /**
+ * Resolve the wgslType and wgslAccess from a Handle by walking up the Handle chain.
+ * Recursively follows Handle → source node's binding until a concrete Buffer/RawBuffer is found.
+ */
+function resolveHandleSource(handle: Handle): { wgslType: string; wgslAccess: string } {
+    const source = handle._node._bindings[handle._name];
+    if (isBuffer(source)) {
+        return { wgslType: source.wgslType, wgslAccess: source.wgslAccess };
+    }
+    if (isRawBuffer(source)) {
+        return { wgslType: source.wgslType, wgslAccess: source.wgslAccess };
+    }
+    if (isHandle(source)) {
+        return resolveHandleSource(source as Handle);
+    }
+    throw new Error(
+        `Volten Error: Handle "${handle._name}" does not resolve to a Buffer or RawBuffer.`
+    );
+}
+
+/**
  * Generate binding entries from user-provided bindings and kernel definition.
  * 
  * Classification rules:
  * - Buffer → var<storage, read|read_write> based on buffer.access
  * - RawBuffer → var<storage, read|read_write> based on buffer.access
- * - Handle → var<storage, read> (outputs from previous passes are read-only inputs)
+ * - Handle → resolved from source node's binding (walks up the Handle chain)
  * - Anything else → throws an error
  * 
- * Validation:
- * - All kernel outputs must be present in bindings (v0: no pool allocator)
- * - No unknown types (numbers, strings, etc.)
- * 
  * @param bindings - User-provided bindings record
- * @param kernel - The kernel definition (for output validation)
+ * @param kernel - The kernel definition
  * @returns Array of classified binding entries
  */
 export function generateBindings(
@@ -63,19 +79,6 @@ export function generateBindings(
 ): BindingEntry[] {
     const entries: BindingEntry[] = [];
     let index = 0;
-
-    // Validate that all kernel outputs are provided
-    for (const output of kernel.outputs) {
-        if (!(output.name in bindings)) {
-            const providedKeys = Object.keys(bindings).join(', ');
-            throw new Error(
-                `Volten Error: Kernel declares output "${output.name}" but it was not provided in bindings.\n` +
-                `  Provided bindings: { ${providedKeys} }\n` +
-                `  Hint: In v0, all output buffers must be explicitly provided. ` +
-                `Create a Buffer and pass it as "${output.name}" in your bindings.`
-            );
-        }
-    }
 
     for (const [name, value] of Object.entries(bindings)) {
         if (isBuffer(value)) {
@@ -97,13 +100,13 @@ export function generateBindings(
                 isHandle: false,
             });
         } else if (isHandle(value)) {
-            // Handles from previous passes are always read-only inputs
-            // The actual type will be resolved from the source node's output buffer
+            // Resolve actual type by walking up the Handle chain
+            const resolved = resolveHandleSource(value);
             entries.push({
                 index: index++,
                 name,
-                wgslType: 'array<f32>', // TODO: resolve actual type from Handle's source
-                wgslAccess: 'read',
+                wgslType: resolved.wgslType,
+                wgslAccess: resolved.wgslAccess,
                 source: value,
                 isHandle: true,
             });
@@ -263,6 +266,7 @@ export function resolveDispatch(
 
 /**
  * Get the element count from a binding value.
+ * Handles are resolved by walking up the chain to the backing Buffer.
  */
 function getBindingCount(value: unknown, name: string): number {
     if (isBuffer(value)) {
@@ -275,6 +279,11 @@ function getBindingCount(value: unknown, name: string): number {
             `RawBuffer doesn't track element count.\n` +
             `  Hint: Specify threads explicitly in the Kernel options.`
         );
+    }
+    if (isHandle(value)) {
+        // Walk up the Handle chain to find the backing Buffer's count
+        const source = (value as Handle)._node._bindings[(value as Handle)._name];
+        return getBindingCount(source, name);
     }
     throw new Error(
         `Volten Error: Cannot infer thread count from binding "${name}" — ` +

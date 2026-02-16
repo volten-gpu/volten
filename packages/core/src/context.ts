@@ -151,23 +151,17 @@ export class VoltenContext {
     /**
      * Resolve a binding value to its GPUBuffer.
      * - Buffer / RawBuffer → call ensure(device)
-     * - Handle → look up the output buffer from the source node's bindings
+     * - Handle → recursively walk up the Handle chain to find the actual buffer
      */
     private _resolveGPUBuffer(value: Buffer | RawBuffer | Handle): GPUBuffer {
         if (value instanceof Buffer || value instanceof RawBuffer) {
             return value.ensure(this.device);
         }
         if (isHandle(value)) {
-            // Handle: the _name tells us which output name on the source node
-            // The source node's bindings record has the actual Buffer/RawBuffer for that name
+            // Recursively resolve: the source node's binding for this name
+            // may itself be a Handle (multi-level chaining)
             const sourceBinding = value._node._bindings[value._name];
-            if (sourceBinding instanceof Buffer || sourceBinding instanceof RawBuffer) {
-                return sourceBinding.ensure(this.device);
-            }
-            throw new Error(
-                `Volten Error: Handle "${value._name}" does not resolve to a Buffer. ` +
-                `This is an internal error — please report it.`
-            );
+            return this._resolveGPUBuffer(sourceBinding as Buffer | RawBuffer | Handle);
         }
         throw new Error(
             `Volten Error: Cannot resolve GPU buffer from binding of type ${typeof value}.`

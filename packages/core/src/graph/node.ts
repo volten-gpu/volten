@@ -3,6 +3,8 @@
 
 import type { Kernel } from '../kernel/kernel.js';
 import type { BindingEntry } from '../kernel/bindings.js';
+import { Buffer } from '../data/buffer.js';
+import { RawBuffer } from '../data/raw-buffer.js';
 
 /**
  * Handle to a buffer output from a compute pass.
@@ -32,6 +34,14 @@ export function isHandle(value: unknown): value is Handle {
     );
 }
 
+/**
+ * Check if a value is a buffer-like binding (Buffer, RawBuffer, or Handle).
+ * These are the binding types that should generate handles on a Node.
+ */
+export function isBufferLike(value: unknown): value is Buffer | RawBuffer | Handle {
+    return value instanceof Buffer || value instanceof RawBuffer || isHandle(value);
+}
+
 // -----------------------------------------------------------------------------
 // Node Design Philosophy:
 // -----------------------------------------------------------------------------
@@ -48,6 +58,13 @@ export function isHandle(value: unknown): value is Handle {
 // - Internal properties are prefixed with "_" (e.g., _id, _dependencies)
 // - User-facing output names must NOT start with "_" (validated at runtime)
 // - This separation allows iteration over outputs via Object.keys filtering
+//
+// All buffer-like bindings (Buffer, RawBuffer, Handle) get handles on the Node,
+// not just declared kernel outputs. This enables in-place buffer re-use without
+// declaring outputs:
+//
+//   const A = v.pass(K, { inout: buf });
+//   const B = v.pass(K, { inout: A.inout });
 // -----------------------------------------------------------------------------
 
 /** Reserved property names that cannot be used as output names */
@@ -104,11 +121,18 @@ export interface NodeBase {
  * Node in the compute DAG.
  * Represents a compute pass with its dependencies and output handles.
  * 
- * Output handles are spread directly onto the node for terse access:
+ * Handles are spread directly onto the node for ALL buffer-like bindings
+ * (Buffer, RawBuffer, Handle), not just declared kernel outputs.
+ * 
  * @example
  * ```ts
- * const A = v.pass(BlurKernel, { in: source });
- * const B = v.pass(SharpenKernel, { in: A.result }); // A.result is a Handle
+ * // Declared outputs
+ * const A = v.pass(BlurKernel, { in: source, out: dest });
+ * const B = v.pass(SharpenKernel, { in: A.out }); // A.out is a Handle
+ * 
+ * // In-place: no outputs declared, but handles still available
+ * const C = v.pass(InPlaceKernel, { data: buf });
+ * const D = v.pass(InPlaceKernel, { data: C.data }); // chaining works
  * ```
  * 
  * @typeParam TOutputs - Record of output names to Handle types
@@ -156,15 +180,15 @@ export interface CreateNodeOptions {
 }
 
 /**
- * Create a Node with output handles spread directly onto it.
+ * Create a Node with handles spread directly onto it.
  * 
  * This is the primary factory for Node objects. It:
  * 1. Creates the NodeBase with all internal properties
- * 2. Creates a Handle for each kernel output
- * 3. Spreads output handles directly onto the node
+ * 2. Creates a Handle for each buffer-like binding (Buffer, RawBuffer, Handle)
+ * 3. Spreads handles directly onto the node
  * 
  * @param options - Node creation options
- * @returns A fully constructed Node with output handles
+ * @returns A fully constructed Node with handles for all buffer-like bindings
  */
 export function createNode(options: CreateNodeOptions): Node {
     const {
@@ -185,11 +209,14 @@ export function createNode(options: CreateNodeOptions): Node {
         _shaderCode: shaderCode,
     };
 
-    // Create and spread output handles onto the node
-    for (const output of kernel.outputs) {
-        const handle = createHandle(node as Node, output.name);
-        node[output.name] = handle;
+    // Create and spread handles for ALL buffer-like bindings
+    for (const [name, value] of Object.entries(bindings)) {
+        if (isBufferLike(value)) {
+            const handle = createHandle(node as Node, name);
+            node[name] = handle;
+        }
     }
 
     return node as Node;
 }
+

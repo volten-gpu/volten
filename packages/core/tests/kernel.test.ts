@@ -294,29 +294,44 @@ describe('Kernel Class', () => {
     });
 
     describe('outputs normalization', () => {
-        it('handles string array outputs', () => {
+        it('handles definedBy outputs', () => {
             const kernel = new Kernel('fn main() { }', {
-                outputs: ['result', 'debug'],
+                outputs: {
+                    result: { definedBy: 'input' },
+                    debug: { definedBy: 'input' },
+                },
             });
             expect(kernel.outputs).toEqual([
-                { name: 'result' },
-                { name: 'debug' },
+                { name: 'result', definedBy: 'input', type: undefined, size: undefined },
+                { name: 'debug', definedBy: 'input', type: undefined, size: undefined },
             ]);
             expect(kernel.outputNames).toEqual(['result', 'debug']);
         });
 
-        it('handles object outputs with size', () => {
+        it('handles explicit type and size outputs', () => {
             const kernel = new Kernel('fn main() { }', {
                 outputs: {
-                    result: { size: 1 },
-                    partial: { size: (data) => (data.input as any).length / 2 },
+                    result: { type: 'array<f32>', size: 1 },
+                    partial: { definedBy: 'input', size: (data) => (data.input as any).length / 2 },
                 },
             });
             expect(kernel.outputs).toHaveLength(2);
             expect(kernel.outputs[0].name).toBe('result');
+            expect(kernel.outputs[0].type).toBe('array<f32>');
             expect(kernel.outputs[0].size).toBe(1);
             expect(kernel.outputs[1].name).toBe('partial');
+            expect(kernel.outputs[1].definedBy).toBe('input');
             expect(typeof kernel.outputs[1].size).toBe('function');
+        });
+
+        it('handles definedBy + explicit type hybrid', () => {
+            const kernel = new Kernel('fn main() { }', {
+                outputs: {
+                    out: { definedBy: 'input', type: 'array<vec3f>' },
+                },
+            });
+            expect(kernel.outputs[0].definedBy).toBe('input');
+            expect(kernel.outputs[0].type).toBe('array<vec3f>');
         });
     });
 

@@ -8,16 +8,30 @@ export type OutputSize = number | ((data: Record<string, unknown>) => number);
 
 /** Configuration for a single output */
 export interface OutputConfig {
+    /**
+     * Infer type (and optionally size) from another binding.
+     * The named binding's wgslType and element count are copied.
+     * Resolved at v.pass() time when actual bindings are known.
+     */
+    definedBy?: string;
+
+    /**
+     * Explicit WGSL type override (e.g. "array<vec3f>").
+     * Takes precedence over definedBy for type.
+     */
+    type?: string;
+
     /** 
-     * Output size specification. If omitted, defaults to same size as primary input.
+     * Output size specification (element count).
+     * Takes precedence over definedBy for size.
      * - number: Fixed size
      * - function: Dynamic size based on pass-time inputs
      */
     size?: OutputSize;
 }
 
-/** Output declarations - simple array or detailed config */
-export type OutputsSpec = string[] | Record<string, OutputConfig>;
+/** Output declarations — record mapping output name to config */
+export type OutputsSpec = Record<string, OutputConfig>;
 
 /**
  * Specifies how many GPU threads to launch for a kernel.
@@ -46,9 +60,19 @@ export type ThreadsSpec =
  */
 export interface KernelOptions {
     /** 
-     * Output declarations.
-     * - string[]: Shorthand, all outputs same size as primary input
-     * - Record<string, OutputConfig>: Explicit size control per output
+     * Output declarations for pool-allocation preparation.
+     * 
+     * Record<string, OutputConfig>: declarative output description with
+     * definedBy / type / size fields.
+     * 
+     * @example
+     * ```ts
+     * outputs: {
+     *   output: { definedBy: 'input' },        // copy type & size from "input"
+     *   result: { type: 'array<f32>', size: 1 }, // explicit override
+     *   half:   { definedBy: 'input', size: (d) => (d.input as Buffer).count / 2 },
+     * }
+     * ```
      */
     outputs?: OutputsSpec;
 
@@ -83,6 +107,8 @@ export interface KernelOptions {
  */
 export interface NormalizedOutput {
     name: string;
+    definedBy?: string;
+    type?: string;
     size?: OutputSize;
 }
 
@@ -97,16 +123,21 @@ export interface NormalizedOutput {
  * 
  * @example
  * ```ts
- * // Simple kernel with shorthand builtins
- * const MyKernel = new Kernel(`
+ * // Simple kernel — no outputs needed for in-place work
+ * const InPlace = new Kernel(`
  *   fn main(gid: vec3<u32>) {
- *     output[gid.x] = input[gid.x] * 2.0;
+ *     data[gid.x] *= 2.0;
  *   }
- * `, { outputs: ['output'] });
+ * `);
+ * 
+ * // Kernel with declarative outputs (for pool allocation)
+ * const BlurKernel = new Kernel(`...`, {
+ *   outputs: { output: { definedBy: 'input' } },
+ * });
  * 
  * // Kernel with explicit output size (e.g., reduce)
  * const ReduceKernel = new Kernel(`...`, {
- *   outputs: { result: { size: 1 } },
+ *   outputs: { result: { type: 'array<f32>', size: 1 } },
  *   workgroupSize: [256],
  * });
  * ```
@@ -116,8 +147,7 @@ export class Kernel {
     readonly source: string;
 
     /** 
-     * Normalized output declarations, object form { name, size } instead of record form:
-     * { "name": { size: ...} }
+     * Normalized output declarations, object form { name, definedBy?, type?, size? }
      */
     readonly outputs: NormalizedOutput[];
 
@@ -166,19 +196,15 @@ export class Kernel {
     }
 
     /**
-     * Normalize outputs from either string[] or Record<string, OutputConfig>
+     * Normalize outputs from Record<string, OutputConfig> to NormalizedOutput[]
      */
     private normalizeOutputs(spec?: OutputsSpec): NormalizedOutput[] {
         if (!spec) return [];
 
-        if (Array.isArray(spec)) {
-            // Simple array of names
-            return spec.map(name => ({ name }));
-        }
-
-        // Record<string, OutputConfig>
         return Object.entries(spec).map(([name, config]) => ({
             name,
+            definedBy: config.definedBy,
+            type: config.type,
             size: config.size,
         }));
     }
