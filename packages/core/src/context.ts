@@ -182,6 +182,16 @@ export class VoltenContext {
 
         const encoder = this.device.createCommandEncoder();
 
+        // We'll try to re-use the pass & current pipeline
+        // as much as possible without beginning new compute passes
+        let pass: GPUComputePassEncoder | null = null;
+        let currentPipeline: GPUComputePipeline | null = null;
+
+        // Track nodes that have been executed within the *current* pass.
+        // If a subsequent node depends on any of these, we must end the pass 
+        // to ensure memory visibility rules (Read-After-Write hazard).
+        const nodesInCurrentPass = new Set<Node>();
+
         for (const node of sorted) {
             // Ensure all Buffer/RawBuffer bindings are uploaded
             for (const entry of node._bindingEntries) {
@@ -203,14 +213,45 @@ export class VoltenContext {
                 entries: bgEntries,
             });
 
-            const pass = encoder.beginComputePass();
-            pass.setPipeline(node._pipeline);
+            // Check for dependencies within the current pass
+            let dependsOnCurrentPass = false;
+            if (pass) {
+                for (const dep of node._dependencies) {
+                    if (nodesInCurrentPass.has(dep)) {
+                        dependsOnCurrentPass = true;
+                        break;
+                    }
+                }
+            }
+
+            // If we have a hazard (dependency in current pass) or no active pass, start a new one
+            if (!pass || dependsOnCurrentPass) {
+                if (pass) {
+                    pass.end();
+                    nodesInCurrentPass.clear();
+                    currentPipeline = null;
+                }
+                pass = encoder.beginComputePass();
+            }
+
+            // Set pipeline only if changed
+            if (currentPipeline !== node._pipeline) {
+                pass.setPipeline(node._pipeline);
+                currentPipeline = node._pipeline;
+            }
+
             pass.setBindGroup(0, bindGroup);
             pass.dispatchWorkgroups(
                 node._dispatch[0],
                 node._dispatch[1],
                 node._dispatch[2],
             );
+
+            // Mark this node as executed in the current pass
+            nodesInCurrentPass.add(node);
+        }
+
+        if (pass) {
             pass.end();
         }
 
