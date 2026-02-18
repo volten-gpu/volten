@@ -162,6 +162,13 @@ export function compile(terminals: Node[]): ExecutionPlan {
     // -----------------------------------------------------------------------
 
     // Each node X in this map contains a set of all the terminal indices where X appears in their subtree
+    /*
+            A              G                   F           <-- terminal nodes (A,G,F)
+           / \            /                     \
+          B   C          C  <-- set = (G,A)      K  <-- set = (F)
+         / \                                      \
+        D   E  <-- set(A)                          D  <-- set = (A, F) 
+    */
     const nodeOwnership = new Map<symbol, Set<number>>();
     const subtrees: Node[][] = [];
 
