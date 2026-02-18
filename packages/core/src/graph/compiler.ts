@@ -161,9 +161,8 @@ export function compile(terminals: Node[]): ExecutionPlan {
     // Phase 1: Discover subtrees + identify shared vs exclusive nodes
     // -----------------------------------------------------------------------
 
-    // Map each node ID to the set of terminal indices whose subtree contains it
+    // Each node X in this map contains a set of all the terminal indices where X appears in their subtree
     const nodeOwnership = new Map<symbol, Set<number>>();
-    // Store subtree nodes per terminal for buffer analysis
     const subtrees: Node[][] = [];
 
     for (let i = 0; i < terminals.length; i++) {
@@ -182,6 +181,13 @@ export function compile(terminals: Node[]): ExecutionPlan {
     // A node is "exclusive" to a terminal if it only appears in that
     // terminal's subtree. Shared nodes are already connected via Handles
     // and don't need synthetic deps.
+    /*
+            A           G
+           / \         /
+          B   C       C   <--- C is not exclusive to A or G since it appears in both subtrees
+         / \   
+        D   E    <-- E is exclusive to A since E only appears in the subtree of A
+    */
     const isExclusive = (nodeId: symbol, terminalIndex: number): boolean => {
         const owners = nodeOwnership.get(nodeId);
         return owners !== undefined && owners.size === 1 && owners.has(terminalIndex);
