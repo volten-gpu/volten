@@ -5,10 +5,7 @@ let v = await volten();
 let k = new Kernel(`
   fn main(gid: vec3u) {
     inout[gid.x] = inout[gid.x] * 2.0;
-  }`,
-  {
-    threads: "inout"
-  }
+  }`
 );
 
 let buffer = new Buffer([1, 2, 3, 4], "f32", "rw");
@@ -18,5 +15,12 @@ let B = v.pass(k, { inout: buffer });
 let C = v.pass(k, { inout: A.inout });
 
 v.run(A, B, C);
-let result = await v.read(A);
+let result = await v.read(C);
+
 console.log(result);
+
+/*
+
+Uncaught Error: Volten Error: Cannot auto-infer thread count — no buffer bindings found.
+
+*/

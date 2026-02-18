@@ -318,19 +318,14 @@ export class VoltenContext {
     }
 
     /**
-     * Execute a node and read back its output buffers to CPU.
+     * Read back a node's output buffers to CPU.
      *
      * Returns a record mapping output names to their typed arrays.
-     * Reads from the last terminal node's outputs.
      *
      * @param node - The terminal node to read from
      * @returns CPU-readable data (typed array or record of typed arrays)
      */
     async read(node: Node): Promise<Record<string, Float32Array>> {
-        const terminals = [node];
-        const plan = this._compile(terminals);
-        this._submit(plan);
-
         const outputs = getNodeOutputs(node);
         const outputNames = Object.keys(outputs);
 
