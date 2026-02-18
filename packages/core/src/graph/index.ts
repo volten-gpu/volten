@@ -2,3 +2,4 @@
 export * from './node.js';
 export * from './scheduler.js';
 export * from './pipeline-cache.js';
+export * from './compiler.js';

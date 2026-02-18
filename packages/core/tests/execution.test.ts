@@ -138,4 +138,58 @@ describe('VoltenContext Execution', () => {
         expect(result).toHaveProperty('output');
         expect(result['output']).toBeInstanceOf(Float32Array);
     });
+
+    // =================================================================
+    // Multi-node v.run()
+    // =================================================================
+
+    it('v.run(A, B) executes two independent nodes', () => {
+        const buf1 = new Buffer([1], 'f32');
+        const buf2 = new Buffer([2], 'f32');
+
+        const K = new Kernel('fn main() {}', { threads: 1 });
+
+        const A = v.pass(K, { data: buf1 });
+        const B = v.pass(K, { data: buf2 });
+
+        v.run(A, B);
+
+        // Both nodes should dispatch
+        expect(mockPassDispatch).toHaveBeenCalledTimes(2);
+        expect(mockSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    it('v.run([A, B]) array form works', () => {
+        const buf1 = new Buffer([1], 'f32');
+        const buf2 = new Buffer([2], 'f32');
+
+        const K = new Kernel('fn main() {}', { threads: 1 });
+
+        const A = v.pass(K, { data: buf1 });
+        const B = v.pass(K, { data: buf2 });
+
+        v.run([A, B]);
+
+        expect(mockPassDispatch).toHaveBeenCalledTimes(2);
+        expect(mockSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    it('v.run(E, L) with shared buffer dispatches all three nodes', () => {
+        // E and K use the same buffer, L chains from K
+        const shared = new Buffer([1], 'f32', 'rw');
+
+        const K1 = new Kernel('fn main() {}', { threads: 1 });
+        const K2 = new Kernel('fn main() {}', { threads: 1 });
+
+        const E = v.pass(K1, { inout: shared });
+        const K = v.pass(K2, { input: shared });
+        const L = v.pass(K2, { src: K.input });
+
+        v.run(E, L);
+
+        // E, K, L = 3 dispatches
+        expect(mockPassDispatch).toHaveBeenCalledTimes(3);
+        expect(mockSubmit).toHaveBeenCalledTimes(1);
+    });
 });
+

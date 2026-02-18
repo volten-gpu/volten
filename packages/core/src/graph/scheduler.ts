@@ -8,7 +8,7 @@ import type { Node } from './node.js';
  * Collect all reachable nodes by walking dependencies from a terminal node.
  * Uses iterative DFS to avoid stack overflows on deep graphs.
  */
-function collectNodes(terminal: Node): Node[] {
+export function collectNodes(terminal: Node): Node[] {
     const visited = new Set<symbol>();
     const nodes: Node[] = [];
     const stack: Node[] = [terminal];

@@ -39,7 +39,7 @@ import {
     type Handle,
     isHandle,
 } from './graph/node.js';
-import { topologicalSort } from './graph/scheduler.js';
+import { compile, type ExecutionPlan } from './graph/compiler.js';
 import { Buffer } from './data/buffer.js';
 import { RawBuffer } from './data/raw-buffer.js';
 
@@ -168,18 +168,41 @@ export class VoltenContext {
         );
     }
 
-    /**
-     * Encode and submit all nodes in the DAG reachable from terminaNode.
-     *
-     * 1. Topological sort (Kahn's algorithm)
-     * 2. Ensure all GPU buffers
-     * 3. Create bind groups
-     * 4. Encode compute passes
-     * 5. Submit command buffer
-     */
-    private _execute(terminalNode: Node): void {
-        const sorted = topologicalSort(terminalNode);
+    // -----------------------------------------------------------------------
+    // Compile → Submit pipeline
+    // -----------------------------------------------------------------------
 
+    /**
+     * Compile one or more terminal nodes into an ExecutionPlan.
+     *
+     * This is a pure graph analysis step — no GPU calls. It:
+     * - Merges multiple terminal subtrees
+     * - Detects shared concrete buffers between independent subtrees
+     * - Injects synthetic dependencies for buffer-overlapping nodes
+     * - Produces a topologically sorted execution order
+     *
+     * This is the seam where pool allocation will slot in (future).
+     *
+     * @param terminals - Terminal nodes in the order specified by v.run()
+     * @returns An ExecutionPlan with nodes in safe execution order
+     */
+    private _compile(terminals: Node[]): ExecutionPlan {
+        return compile(terminals);
+    }
+
+    /**
+     * Submit an ExecutionPlan to the GPU.
+     *
+     * Takes a pre-compiled plan (sorted node list) and:
+     * 1. Ensures all GPU buffers are uploaded
+     * 2. Creates bind groups (resolving Handles to actual GPUBuffers)
+     * 3. Manages compute passes (reuses when possible, breaks on hazards)
+     * 4. Encodes dispatches
+     * 5. Submits the command buffer
+     *
+     * @param plan - The compiled execution plan
+     */
+    private _submit(plan: ExecutionPlan): void {
         const encoder = this.device.createCommandEncoder();
 
         // We'll try to re-use the pass & current pipeline
@@ -188,11 +211,11 @@ export class VoltenContext {
         let currentPipeline: GPUComputePipeline | null = null;
 
         // Track nodes that have been executed within the *current* pass.
-        // If a subsequent node depends on any of these, we must end the pass 
+        // If a subsequent node depends on any of these, we must end the pass
         // to ensure memory visibility rules (Read-After-Write hazard).
         const nodesInCurrentPass = new Set<Node>();
 
-        for (const node of sorted) {
+        for (const node of plan.sorted) {
             // Ensure all Buffer/RawBuffer bindings are uploaded
             for (const entry of node._bindingEntries) {
                 if (entry.source instanceof Buffer || entry.source instanceof RawBuffer) {
@@ -259,25 +282,38 @@ export class VoltenContext {
     }
 
     /**
-     * Execute a node or chain of nodes (fire and forget).
+     * Execute one or more terminal nodes (fire and forget).
      * Does not wait for GPU completion.
      *
-     * Topologically sorts the DAG reachable from `node`, encodes all
-     * compute passes into a single command buffer, and submits it.
      *
-     * @param node - The terminal node to execute
+     * When multiple terminals are provided, the positional order
+     * determines scheduling priority for independent nodes that share
+     * concrete buffers. Handle-connected nodes are always ordered
+     * correctly regardless of argument order.
+     *
+     * @param nodes - Terminal node(s) to execute
      */
-    run(node: Node): void {
-        this._execute(node);
+    run(node: Node): void;
+    run(...nodes: Node[]): void;
+    run(nodes: Node[]): void;
+    run(...args: (Node | Node[])[]): void {
+        const terminals = this._normalizeTerminals(args);
+        const plan = this._compile(terminals);
+        this._submit(plan);
     }
 
     /**
-     * Execute a node and wait for GPU completion.
+     * Execute one or more terminal nodes and wait for GPU completion.
      *
-     * @param node - The terminal node to execute
+     * @param nodes - Terminal node(s) to execute
      */
-    async wait(node: Node): Promise<void> {
-        this._execute(node);
+    async wait(node: Node): Promise<void>;
+    async wait(...nodes: Node[]): Promise<void>;
+    async wait(nodes: Node[]): Promise<void>;
+    async wait(...args: (Node | Node[])[]): Promise<void> {
+        const terminals = this._normalizeTerminals(args);
+        const plan = this._compile(terminals);
+        this._submit(plan);
         await this.device.queue.onSubmittedWorkDone();
     }
 
@@ -285,13 +321,15 @@ export class VoltenContext {
      * Execute a node and read back its output buffers to CPU.
      *
      * Returns a record mapping output names to their typed arrays.
-     * If the node has a single output, returns that typed array directly.
+     * Reads from the last terminal node's outputs.
      *
      * @param node - The terminal node to read from
      * @returns CPU-readable data (typed array or record of typed arrays)
      */
     async read(node: Node): Promise<Record<string, Float32Array>> {
-        this._execute(node);
+        const terminals = [node];
+        const plan = this._compile(terminals);
+        this._submit(plan);
 
         const outputs = getNodeOutputs(node);
         const outputNames = Object.keys(outputs);
@@ -341,5 +379,18 @@ export class VoltenContext {
         }
 
         return result;
+    }
+
+    /**
+     * Normalize the variadic arguments from run/wait into a flat Node array.
+     * Supports: run(node), run(A, B, C), run([A, B, C])
+     */
+    private _normalizeTerminals(args: (Node | Node[])[]): Node[] {
+        // run([A, B, C]) — single array argument
+        if (args.length === 1 && Array.isArray(args[0])) {
+            return args[0] as Node[];
+        }
+        // run(A) or run(A, B, C) — individual node arguments
+        return args as Node[];
     }
 }
