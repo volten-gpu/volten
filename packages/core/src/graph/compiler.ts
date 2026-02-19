@@ -92,26 +92,6 @@ export function resolveConcreteBuffer(value: unknown): Buffer | RawBuffer | null
 }
 
 /**
- * Collect all unique concrete buffers used by a set of nodes.
- * Walks each node's bindings and resolves Handles to their root buffers.
- *
- * @param nodes - Nodes to inspect (typically all nodes in a subtree)
- * @returns Set of concrete Buffer/RawBuffer instances used by these nodes
- */
-function collectConcreteBuffers(nodes: Node[]): Set<Buffer | RawBuffer> {
-    const buffers = new Set<Buffer | RawBuffer>();
-    for (const node of nodes) {
-        for (const value of Object.values(node._bindings)) {
-            const concrete = resolveConcreteBuffer(value);
-            if (concrete !== null) {
-                buffers.add(concrete);
-            }
-        }
-    }
-    return buffers;
-}
-
-/**
  * Compile one or more terminal nodes into an ExecutionPlan.
  *
  * This is the central scheduling function. It:
@@ -292,6 +272,7 @@ export function compile(terminals: Node[]): ExecutionPlan {
     // Phase 4: Topological sort the merged graph
     // -----------------------------------------------------------------------
 
+    // This is where we actually resolve handle/graph-based dependencies
     const sorted = topologicalSort(sentinel);
 
     // Strip the sentinel — it's not a real compute node
