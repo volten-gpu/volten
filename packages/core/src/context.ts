@@ -45,6 +45,11 @@ import { RawBuffer } from './data/raw-buffer.js';
 import { getTypedArrayForType } from './utils/alignment.js';
 
 /**
+ * Valid targets for reading back data to the CPU.
+ */
+export type ReadTarget = Node | Buffer | RawBuffer | Handle;
+
+/**
  * The main Volten context - the "v" instance
  * 
  * This is created via the volten() factory function.
@@ -150,23 +155,30 @@ export class VoltenContext {
     }
 
     /**
-     * Resolve a binding value to its GPUBuffer.
-     * - Buffer / RawBuffer → call ensure(device)
-     * - Handle → recursively walk up the Handle chain to find the actual buffer
+     * Resolve a binding value to its concrete Buffer or RawBuffer.
+     * - Buffer / RawBuffer → returns self
+     * - Handle → recursively walks up the Handle chain to find the actual buffer
      */
-    private _resolveGPUBuffer(value: Buffer | RawBuffer | Handle): GPUBuffer {
+    private _resolveConcreteBuffer(value: Buffer | RawBuffer | Handle): Buffer | RawBuffer {
         if (value instanceof Buffer || value instanceof RawBuffer) {
-            return value.ensure(this.device);
+            return value;
         }
         if (isHandle(value)) {
             // Recursively resolve: the source node's binding for this name
             // may itself be a Handle (multi-level chaining)
             const sourceBinding = value._node._bindings[value._name];
-            return this._resolveGPUBuffer(sourceBinding as Buffer | RawBuffer | Handle);
+            return this._resolveConcreteBuffer(sourceBinding as Buffer | RawBuffer | Handle);
         }
         throw new Error(
-            `Volten Error: Cannot resolve GPU buffer from binding of type ${typeof value}.`
+            `Volten Error: Cannot resolve concrete buffer from binding of type ${typeof value}.`
         );
+    }
+
+    /**
+     * Resolve a binding value to its GPUBuffer.
+     */
+    private _resolveGPUBuffer(value: Buffer | RawBuffer | Handle): GPUBuffer {
+        return this._resolveConcreteBuffer(value).ensure(this.device);
     }
 
     // -----------------------------------------------------------------------
@@ -286,19 +298,15 @@ export class VoltenContext {
      * Execute one or more terminal nodes (fire and forget).
      * Does not wait for GPU completion.
      *
-     *
      * When multiple terminals are provided, the positional order
      * determines scheduling priority for independent nodes that share
      * concrete buffers. Handle-connected nodes are always ordered
      * correctly regardless of argument order.
      *
-     * @param nodes - Terminal node(s) to execute
+     * @param node - Terminal node(s) to execute
      */
-    run(node: Node): void;
-    run(...nodes: Node[]): void;
-    run(nodes: Node[]): void;
-    run(...args: (Node | Node[])[]): void {
-        const terminals = this._normalizeTerminals(args);
+    run(node: Node | Node[]): void {
+        const terminals = Array.isArray(node) ? node : [node];
         const plan = this._compile(terminals);
         this._submit(plan);
     }
@@ -306,100 +314,127 @@ export class VoltenContext {
     /**
      * Execute one or more terminal nodes and wait for GPU completion.
      *
-     * @param nodes - Terminal node(s) to execute
+     * @param node - Terminal node(s) to execute
      */
-    async wait(node: Node): Promise<void>;
-    async wait(...nodes: Node[]): Promise<void>;
-    async wait(nodes: Node[]): Promise<void>;
-    async wait(...args: (Node | Node[])[]): Promise<void> {
-        const terminals = this._normalizeTerminals(args);
+    async wait(node: Node | Node[]): Promise<void> {
+        const terminals = Array.isArray(node) ? node : [node];
         const plan = this._compile(terminals);
         this._submit(plan);
         await this.device.queue.onSubmittedWorkDone();
     }
 
     /**
-     * Read back a node's output buffers to CPU.
+     * Read back targets (Nodes, Buffers, Handles) from GPU to CPU.
      *
-     * Returns a record mapping output names to their typed arrays.
+     * If passed a single target, returns data for that target.
+     * If passed an array of targets, returns an array of results.
      *
-     * @param node - The terminal node to read from
-     * @returns CPU-readable data (typed array or record of typed arrays)
+     * A Node target returns a Record of its output names to their ArrayBuffer/TypedArray.
+     * A Buffer/RawBuffer/Handle returns a single ArrayBuffer/TypedArray.
      */
-    async read(node: Node): Promise<Record<string, ArrayBufferView | ArrayBuffer>> {
-        const outputs = getNodeOutputs(node);
-        const outputNames = Object.keys(outputs);
+    async read(target: ReadTarget): Promise<any>;
+    async read(targets: ReadTarget[]): Promise<any[]>;
+    async read(target: ReadTarget | ReadTarget[]): Promise<any> {
+        const isArrayTarget = Array.isArray(target);
+        const targets = isArrayTarget ? target : [target];
 
-        if (outputNames.length === 0) {
-            throw new Error(
-                'Volten Error: v.read() called on a node with no declared outputs.\n' +
-                '  Hint: Make sure your Kernel has outputs declared, e.g.:\n' +
-                '    new Kernel(`...`, { outputs: [\'result\'] })'
-            );
+        // 1. Determine all unique concrete buffers we need to read
+        // this is necessary to prevent duplicate requests
+        // Mapping from Concrete Buffer -> { staging: GPUBuffer, size: number }
+        const uniqueBuffers = new Map<Buffer | RawBuffer, { staging: GPUBuffer; size: number }>();
+
+        // once we retrieve all the buffers, we'll iterate through these "plans" to map
+        // the resolved arrays to the appropriate return targets
+        type TargetPlan =
+            | { type: 'node'; node: Node; outputs: { name: string; concrete: Buffer | RawBuffer }[] }
+            | { type: 'buffer'; concrete: Buffer | RawBuffer };
+
+        const targetPlans: TargetPlan[] = [];
+
+        for (const t of targets) {
+            if (t instanceof Buffer || t instanceof RawBuffer || isHandle(t)) {
+                const concrete = this._resolveConcreteBuffer(t);
+                uniqueBuffers.set(concrete, { staging: null!, size: concrete.byteLength });
+                targetPlans.push({ type: 'buffer', concrete });
+            } else {
+                // It's a Node
+                const nodeOutputs = getNodeOutputs(t as Node);
+                const outputNames = Object.keys(nodeOutputs);
+                if (outputNames.length === 0) {
+                    throw new Error(
+                        'Volten Error: v.read() called on a node with no declared outputs.\n' +
+                        '  Hint: Make sure your Kernel has outputs declared, e.g.:\n' +
+                        '    new Kernel(`...`, { outputs: [\'result\'] })'
+                    );
+                }
+                const outputs: { name: string; concrete: Buffer | RawBuffer }[] = [];
+                for (const name of outputNames) {
+                    const handle = nodeOutputs[name];
+                    const concrete = this._resolveConcreteBuffer(handle);
+                    uniqueBuffers.set(concrete, { staging: null!, size: concrete.byteLength });
+                    outputs.push({ name, concrete });
+                }
+                targetPlans.push({ type: 'node', node: t as Node, outputs });
+            }
         }
 
-        // For each output, create a staging buffer, copy, and read back
-        const result: Record<string, ArrayBufferView | ArrayBuffer> = {};
+        if (uniqueBuffers.size === 0) {
+            return isArrayTarget ? [] : undefined;
+        }
+
         const encoder = this.device.createCommandEncoder();
-        const stagingBuffers: { name: string; staging: GPUBuffer; size: number; binding: Buffer | RawBuffer | Handle }[] = [];
 
-        for (const name of outputNames) {
-            const binding = node._bindings[name];
-            if (!(binding instanceof Buffer) && !(binding instanceof RawBuffer)) {
-                throw new Error(
-                    `Volten Error: Output "${name}" is not a Buffer/RawBuffer — cannot read back.`
-                );
-            }
-
-            const gpuBuffer = binding.ensure(this.device);
-            const size = binding.byteLength;
-
+        // 2. Create staging buffers and issue copies
+        for (const [concrete, info] of uniqueBuffers.entries()) {
+            const gpuBuffer = concrete.ensure(this.device);
             const staging = this.device.createBuffer({
-                size,
+                size: info.size,
                 usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
             });
-
-            encoder.copyBufferToBuffer(gpuBuffer, 0, staging, 0, size);
-            stagingBuffers.push({ name, staging, size, binding });
+            info.staging = staging;
+            encoder.copyBufferToBuffer(gpuBuffer, 0, staging, 0, info.size);
         }
 
         this.device.queue.submit([encoder.finish()]);
 
-        // Map all staging buffers and read data
-        for (const { name, staging, size, binding } of stagingBuffers) {
-            await staging.mapAsync(GPUMapMode.READ);
-            const mappedRange = staging.getMappedRange().slice(0);
+        // 3. Map memory and extract TypedArrays
+        const materializedBuffers = new Map<Buffer | RawBuffer, ArrayBufferView | ArrayBuffer>();
+
+        for (const [concrete, info] of uniqueBuffers.entries()) {
+            await info.staging.mapAsync(GPUMapMode.READ);
+            const mappedRange = info.staging.getMappedRange().slice(0); // Clone the data securely
 
             let TypedArrayConstructor: Float32ArrayConstructor | Uint32ArrayConstructor | Int32ArrayConstructor | undefined = Float32Array;
-            if (binding instanceof Buffer) {
-                TypedArrayConstructor = getTypedArrayForType(binding.type);
+            if (concrete instanceof Buffer) {
+                TypedArrayConstructor = getTypedArrayForType(concrete.type);
             }
 
             let data: ArrayBufferView | ArrayBuffer;
             if (TypedArrayConstructor) {
                 data = new TypedArrayConstructor(mappedRange);
             } else {
-                data = mappedRange; // ArrayBuffer for structs or unsupported
+                data = mappedRange; // ArrayBuffer for structs or raw data
             }
 
-            staging.unmap();
-            staging.destroy();
-            result[name] = data;
+            info.staging.unmap();
+            info.staging.destroy();
+
+            materializedBuffers.set(concrete, data);
         }
 
-        return result;
-    }
+        // 4. Reconstruct results
+        const results = targetPlans.map(plan => {
+            if (plan.type === 'buffer') {
+                return materializedBuffers.get(plan.concrete)!;
+            } else {
+                const record: Record<string, ArrayBufferView | ArrayBuffer> = {};
+                for (const out of plan.outputs) {
+                    record[out.name] = materializedBuffers.get(out.concrete)!;
+                }
+                return record;
+            }
+        });
 
-    /**
-     * Normalize the variadic arguments from run/wait into a flat Node array.
-     * Supports: run(node), run(A, B, C), run([A, B, C])
-     */
-    private _normalizeTerminals(args: (Node | Node[])[]): Node[] {
-        // run([A, B, C]) — single array argument
-        if (args.length === 1 && Array.isArray(args[0])) {
-            return args[0] as Node[];
-        }
-        // run(A) or run(A, B, C) — individual node arguments
-        return args as Node[];
+        return isArrayTarget ? results : results[0];
     }
 }

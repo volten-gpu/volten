@@ -21,7 +21,7 @@ let C = v.pass(k, { inout: A.inout });
 (B as any).name = "B";
 (C as any).name = "C";
 
-v.run(A, B, C);
+v.run([A, B, C]);
 
 let result = await v.read(A);
 console.log(result);

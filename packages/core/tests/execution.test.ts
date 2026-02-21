@@ -162,7 +162,7 @@ describe('VoltenContext Execution', () => {
         const A = v.pass(K, { data: buf1 });
         const B = v.pass(K, { data: buf2 });
 
-        v.run(A, B);
+        v.run([A, B]);
 
         // Both nodes should dispatch
         expect(mockPassDispatch).toHaveBeenCalledTimes(2);
@@ -195,7 +195,7 @@ describe('VoltenContext Execution', () => {
         const K = v.pass(K2, { input: shared });
         const L = v.pass(K2, { src: K.input });
 
-        v.run(E, L);
+        v.run([E, L]);
 
         // E, K, L = 3 dispatches
         expect(mockPassDispatch).toHaveBeenCalledTimes(3);
