@@ -38,6 +38,15 @@
 // naturally places C before both D and G, and D/G remain unordered
 // relative to each other (they can run in parallel).
 //
+// # Priority-based tiebreaking
+//
+// Even after synthetic deps are injected, Kahn's algorithm may encounter
+// multiple nodes that are simultaneously free. The compiler assigns each
+// node a priority equal to the minimum terminal index it belongs to.
+// This priority is passed to topologicalSort as a tiebreaker, ensuring
+// that v.run(A, B, C) produces execution order consistent with the user's
+// positional intent at every level of the graph.
+//
 // # Pool-allocated buffers
 //
 // Pool-allocated buffers (future feature) are exempt from overlap
@@ -49,8 +58,7 @@
 // ============================================================================
 
 import type { Node } from './node.js';
-import { collectNodes } from './scheduler.js';
-import { topologicalSort } from './scheduler.js';
+import { collectNodes, topologicalSort } from './scheduler.js';
 import { Buffer } from '../data/buffer.js';
 import { RawBuffer } from '../data/raw-buffer.js';
 import { isHandle, type Handle } from './node.js';
@@ -107,11 +115,12 @@ export function resolveConcreteBuffer(value: unknown): Buffer | RawBuffer | null
  *    exclusive nodes of different terminals, the previous terminal becomes
  *    a dependency of the current terminal. This ensures Kahn's algorithm
  *    places the previous terminal's subtree first.
- * 5. **Creates a virtual sentinel** — an ephemeral node that depends on
- *    all terminals (including those with injected synthetic deps). This
- *    gives topologicalSort a single entry point for the merged graph.
- * 6. **Strips the sentinel** — the sentinel is removed from the sorted
- *    output since it's not a real compute node.
+ * 5. **Builds a priority map** — each node gets a priority equal to the
+ *    minimum terminal index it belongs to. This is passed to topologicalSort
+ *    as a tiebreaker so that nodes affiliated with earlier terminals are
+ *    scheduled first.
+ * 6. **Topologically sorts** — the (possibly augmented) terminal list is
+ *    sorted directly
  *
  * @param terminals - Terminal nodes in the order specified by v.run()
  * @returns An ExecutionPlan with nodes in safe execution order
@@ -126,6 +135,20 @@ export function resolveConcreteBuffer(value: unknown): Buffer | RawBuffer | null
  * ```
  */
 export function compile(terminals: Node[]): ExecutionPlan {
+    // Question: why is this function necessary? can't we simply use the topological sort with the
+    // graph-api?
+    // Answer: No, because it woulnd't track this kind of dependencies:
+    // A = v.pass(k, { inout: buffer1 });
+    // B = v.pass(k, { inout: buffer1 });
+    // C = v.pass(k, { inout: buffer1 });
+    // v.run(A, B, C);
+    //
+    // ^ these passes can't run all in parallel while keeping the same Pass open and adding multiple
+    // dispatches, because we would risk Read-Write conflicts, this is the reason why this function exists,
+    // it tries to find the implicit dependencies based on which buffers are being used by which node.
+    // when it finds these dependencies, it will inject synthetic graph-dependencies and only then we run
+    // the topological sort 
+
     if (terminals.length === 0) {
         throw new Error(
             'Volten Error: compile() called with no terminal nodes.'
@@ -134,7 +157,7 @@ export function compile(terminals: Node[]): ExecutionPlan {
 
     // Fast path: single terminal, no merging needed
     if (terminals.length === 1) {
-        return { sorted: topologicalSort(terminals[0]) };
+        return { sorted: topologicalSort([terminals[0]]) };
     }
 
     // -----------------------------------------------------------------------
@@ -216,23 +239,15 @@ export function compile(terminals: Node[]): ExecutionPlan {
     }
 
     // -----------------------------------------------------------------------
-    // Phase 3: Create virtual sentinel with merged dependencies
+    // Phase 3: Inject synthetic dependencies into terminal nodes
     // -----------------------------------------------------------------------
-
-    // The sentinel depends on all terminals. Additionally, for terminals
-    // with synthetic deps, we inject the dependency directly on the
-    // terminal node so topologicalSort sees the edge.
-    //
-    // We need to clone terminals that gain synthetic deps because Node
-    // has frozen dependencies. We create thin wrappers that add the
-    // extra deps without mutating the originals.
 
     const finalTerminals: Node[] = [];
 
     for (let i = 0; i < terminals.length; i++) {
         if (syntheticDeps[i].size > 0) {
             // This terminal needs synthetic deps — create a wrapper node
-            // that has the original deps + the synthetic ones
+            // that has the original deps + the synthetic ones.
             // Use finalTerminals (not originals) so chained synthetic deps
             // compose correctly: if G depends on F and F depends on E,
             // G's dep must point to the wrapped F that already includes E.
@@ -254,29 +269,19 @@ export function compile(terminals: Node[]): ExecutionPlan {
         }
     }
 
-    // Virtual sentinel: depends on all (possibly wrapped) terminals.
-    // This gives topologicalSort a single entry point.
-    const sentinel: Node = {
-        _id: Symbol('Sentinel'),
-        _dependencies: Object.freeze(finalTerminals),
-        _kernel: {} as any,
-        _pipeline: {} as any,
-        _bindGroupLayout: {} as any,
-        _bindingEntries: Object.freeze([]),
-        _dispatch: Object.freeze([1, 1, 1]) as readonly [number, number, number],
-        _bindings: Object.freeze({}),
-        _shaderCode: '',
-    } as any as Node;
-
     // -----------------------------------------------------------------------
-    // Phase 4: Topological sort the merged graph
+    // Phase 4: Build priority map + topological sort
     // -----------------------------------------------------------------------
 
-    // This is where we actually resolve handle/graph-based dependencies
-    const sorted = topologicalSort(sentinel);
+    // Each node's priority is the minimum terminal index it belongs to.
+    // This ensures that when multiple nodes become free simultaneously,
+    // nodes affiliated with earlier terminals are scheduled first.
+    const priority = new Map<symbol, number>();
+    for (const [nodeId, owners] of nodeOwnership) {
+        priority.set(nodeId, Math.min(...owners));
+    }
 
-    // Strip the sentinel — it's not a real compute node
-    const result = sorted.filter(n => n._id !== sentinel._id);
+    const sorted = topologicalSort(finalTerminals, priority);
 
-    return { sorted: result };
+    return { sorted };
 }

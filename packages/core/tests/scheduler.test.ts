@@ -25,7 +25,7 @@ describe('DAG Scheduler (Kahn\'s Algorithm)', () => {
         const B = makeNode('B', [A]);
         const C = makeNode('C', [B]);
 
-        const sorted = topologicalSort(C);
+        const sorted = topologicalSort([C]);
 
         // Expect: A, B, C
         expect(sorted).toHaveLength(3);
@@ -43,7 +43,7 @@ describe('DAG Scheduler (Kahn\'s Algorithm)', () => {
         const C = makeNode('C', [A]);
         const D = makeNode('D', [B, C]);
 
-        const sorted = topologicalSort(D);
+        const sorted = topologicalSort([D]);
 
         expect(sorted).toHaveLength(4);
         expect(sorted[0]).toBe(A);
@@ -73,7 +73,7 @@ describe('DAG Scheduler (Kahn\'s Algorithm)', () => {
         const C = makeNode('C', [A, E]);
         const D = makeNode('D', [B, C]);
 
-        const sorted = topologicalSort(D);
+        const sorted = topologicalSort([D]);
 
         expect(sorted).toHaveLength(5);
         expect(sorted[4]).toBe(D);
@@ -97,7 +97,7 @@ describe('DAG Scheduler (Kahn\'s Algorithm)', () => {
         const A = makeNode('A');
         (A as any)._dependencies = [A]; // Hack to create cycle
 
-        expect(() => topologicalSort(A)).toThrow(/Cycle detected/);
+        expect(() => topologicalSort([A])).toThrow(/Cycle detected/);
     });
 
     it('throws on indirect cycle', () => {
@@ -107,7 +107,7 @@ describe('DAG Scheduler (Kahn\'s Algorithm)', () => {
         const C = makeNode('C', [B]);
         (A as any)._dependencies = [C];
 
-        expect(() => topologicalSort(C)).toThrow(/Cycle detected/);
+        expect(() => topologicalSort([C])).toThrow(/Cycle detected/);
     });
 
     it('ignores unreachable nodes', () => {
@@ -117,11 +117,76 @@ describe('DAG Scheduler (Kahn\'s Algorithm)', () => {
         const B = makeNode('B', [A]);
         const C = makeNode('C'); // Executing B should not verify C
 
-        const sorted = topologicalSort(B);
+        const sorted = topologicalSort([B]);
 
         expect(sorted).toHaveLength(2);
         expect(sorted).toContain(A);
         expect(sorted).toContain(B);
         expect(sorted).not.toContain(C);
+    });
+
+    it('sorts multiple roots', () => {
+        const A = makeNode('A');
+        const B = makeNode('B');
+        const C = makeNode('C', [A]);
+
+        const sorted = topologicalSort([C, B]);
+
+        expect(sorted).toHaveLength(3);
+        expect(sorted).toContain(A);
+        expect(sorted).toContain(B);
+        expect(sorted).toContain(C);
+        // A must come before C
+        expect(sorted.indexOf(A)).toBeLessThan(sorted.indexOf(C));
+    });
+
+    it('respects priority tiebreaking for in-degree-0 nodes', () => {
+        // A and B are both independent roots — priority determines order
+        const A = makeNode('A');
+        const B = makeNode('B');
+
+        const priority = new Map<symbol, number>();
+        priority.set(A._id, 0);
+        priority.set(B._id, 1);
+
+        const sorted = topologicalSort([A, B], priority);
+
+        expect(sorted).toHaveLength(2);
+        expect(sorted[0]).toBe(A);
+        expect(sorted[1]).toBe(B);
+
+        const sorted2 = topologicalSort([B, A], priority);
+
+        expect(sorted2).toHaveLength(2);
+        expect(sorted2[0]).toBe(A);    // A before B due to lower priority
+        expect(sorted2[1]).toBe(B);
+    });
+
+    it('respects priority tiebreaking at deeper levels', () => {
+        // X is a shared dependency. A and B both depend on X.
+        // When X is processed, A and B become free simultaneously.
+        // Priority should determine which runs first.
+        const X = makeNode('X');
+        const A = makeNode('A', [X]);
+        const B = makeNode('B', [X]);
+
+        const priority = new Map<symbol, number>();
+        priority.set(X._id, 0);
+        priority.set(A._id, 0); // A affiliated with terminal 0
+        priority.set(B._id, 1); // B affiliated with terminal 1
+
+        const sorted = topologicalSort([A, B], priority);
+
+        expect(sorted).toHaveLength(3);
+        expect(sorted[0]).toBe(X);
+        expect(sorted[1]).toBe(A); // A before B due to lower priority
+        expect(sorted[2]).toBe(B);
+
+        const sorted2 = topologicalSort([B, A], priority);
+
+        expect(sorted2).toHaveLength(3);
+        expect(sorted2[0]).toBe(X);
+        expect(sorted2[1]).toBe(A); // A before B due to lower priority
+        expect(sorted2[2]).toBe(B);
     });
 });
