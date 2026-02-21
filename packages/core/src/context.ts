@@ -42,6 +42,7 @@ import {
 import { compile, type ExecutionPlan } from './graph/compiler.js';
 import { Buffer } from './data/buffer.js';
 import { RawBuffer } from './data/raw-buffer.js';
+import { getTypedArrayForType } from './utils/alignment.js';
 
 /**
  * The main Volten context - the "v" instance
@@ -325,7 +326,7 @@ export class VoltenContext {
      * @param node - The terminal node to read from
      * @returns CPU-readable data (typed array or record of typed arrays)
      */
-    async read(node: Node): Promise<Record<string, Float32Array>> {
+    async read(node: Node): Promise<Record<string, ArrayBufferView | ArrayBuffer>> {
         const outputs = getNodeOutputs(node);
         const outputNames = Object.keys(outputs);
 
@@ -338,9 +339,9 @@ export class VoltenContext {
         }
 
         // For each output, create a staging buffer, copy, and read back
-        const result: Record<string, Float32Array> = {};
+        const result: Record<string, ArrayBufferView | ArrayBuffer> = {};
         const encoder = this.device.createCommandEncoder();
-        const stagingBuffers: { name: string; staging: GPUBuffer; size: number }[] = [];
+        const stagingBuffers: { name: string; staging: GPUBuffer; size: number; binding: Buffer | RawBuffer | Handle }[] = [];
 
         for (const name of outputNames) {
             const binding = node._bindings[name];
@@ -359,15 +360,28 @@ export class VoltenContext {
             });
 
             encoder.copyBufferToBuffer(gpuBuffer, 0, staging, 0, size);
-            stagingBuffers.push({ name, staging, size });
+            stagingBuffers.push({ name, staging, size, binding });
         }
 
         this.device.queue.submit([encoder.finish()]);
 
         // Map all staging buffers and read data
-        for (const { name, staging, size } of stagingBuffers) {
+        for (const { name, staging, size, binding } of stagingBuffers) {
             await staging.mapAsync(GPUMapMode.READ);
-            const data = new Float32Array(staging.getMappedRange().slice(0));
+            const mappedRange = staging.getMappedRange().slice(0);
+
+            let TypedArrayConstructor: Float32ArrayConstructor | Uint32ArrayConstructor | Int32ArrayConstructor | undefined = Float32Array;
+            if (binding instanceof Buffer) {
+                TypedArrayConstructor = getTypedArrayForType(binding.type);
+            }
+
+            let data: ArrayBufferView | ArrayBuffer;
+            if (TypedArrayConstructor) {
+                data = new TypedArrayConstructor(mappedRange);
+            } else {
+                data = mappedRange; // ArrayBuffer for structs or unsupported
+            }
+
             staging.unmap();
             staging.destroy();
             result[name] = data;

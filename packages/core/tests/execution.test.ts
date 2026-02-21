@@ -119,11 +119,18 @@ describe('VoltenContext Execution', () => {
         expect(mockOnSubmittedWorkDone).toHaveBeenCalled();
     });
 
-    it('v.read() reads back outputs', async () => {
+    it('v.read() reads back outputs and parses them into TypedArrays based on type', async () => {
         const input = new Buffer([1], 'f32');
-        const output = new Buffer([0], 'f32');
-        const K = new Kernel('fn main() {}', { outputs: { output: { definedBy: 'input' } }, threads: 'input' });
-        const node = v.pass(K, { input, output });
+        const outputFloat = new Buffer([0], 'f32');
+        const outputUint = new Buffer([0], 'u32');
+        const K = new Kernel('fn main() {}', {
+            outputs: {
+                outputFloat: { type: 'f32', size: 1 },
+                outputUint: { type: 'u32', size: 1 }
+            },
+            threads: 'input'
+        });
+        const node = v.pass(K, { input, outputFloat, outputUint });
 
         const result = await v.read(node);
 
@@ -135,8 +142,11 @@ describe('VoltenContext Execution', () => {
         expect(mockGetMappedRange).toHaveBeenCalled();
 
         // Check result structure
-        expect(result).toHaveProperty('output');
-        expect(result['output']).toBeInstanceOf(Float32Array);
+        expect(result).toHaveProperty('outputFloat');
+        expect(result['outputFloat']).toBeInstanceOf(Float32Array);
+
+        expect(result).toHaveProperty('outputUint');
+        expect(result['outputUint']).toBeInstanceOf(Uint32Array);
     });
 
     // =================================================================

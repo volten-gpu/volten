@@ -5,7 +5,7 @@
  * WGSL-compatible binary format with proper alignment and padding.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { pack, getStride, roundUp, getByteLength } from '../src/utils/alignment.js';
+import { pack, unpack, getStride, roundUp, getByteLength } from '../src/utils/alignment.js';
 import { struct, array, resolveType, getWgslType } from '../src/types/schema.js';
 import { PRIMITIVE_INFO, isPrimitiveType, getPrimitiveInfo } from '../src/types/primitives.js';
 
@@ -623,5 +623,107 @@ describe('Edge Cases', () => {
         const input = new Float32Array([1.0, 2.0, 3.0]);
         const packed = pack(Array.from(input), 'f32');
         expect(readFloats(packed, 3)).toEqual([1.0, 2.0, 3.0]);
+    });
+});
+
+// =============================================================================
+// UNPACK TESTS
+// =============================================================================
+
+describe('Unpacking', () => {
+    describe('Primitives', () => {
+        it('unpacks f32 correctly', () => {
+            const data = [3.14, -5.5, 0];
+            const packed = pack(data, 'f32');
+            const unpacked = unpack(packed, 'f32') as number[];
+            expect(unpacked[0]).toBeCloseTo(data[0], 5);
+            expect(unpacked[1]).toBeCloseTo(data[1], 5);
+            expect(unpacked[2]).toBe(data[2]);
+        });
+
+        it('unpacks vec3f correctly', () => {
+            const data = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
+            const packed = pack(data, 'vec3f');
+            const unpacked = unpack(packed, 'vec3f');
+            expect(unpacked).toEqual(data);
+        });
+
+        it('unpacks mat4x4f correctly', () => {
+            const matrix = [
+                1, 2, 3, 4,
+                5, 6, 7, 8,
+                9, 10, 11, 12,
+                13, 14, 15, 16,
+            ];
+            const packed = pack([matrix], 'mat4x4f');
+            const unpacked = unpack(packed, 'mat4x4f');
+            expect(unpacked).toEqual([matrix]);
+        });
+
+        it('unpacks bool correctly', () => {
+            const data = [true, false, true];
+            const packed = pack(data, 'bool');
+            const unpacked = unpack(packed, 'bool');
+            expect(unpacked).toEqual(data);
+        });
+    });
+
+    describe('Structs', () => {
+        const Particle = struct('Particle', {
+            position: 'vec3f',
+            velocity: 'vec3f',
+            mass: 'f32',
+        });
+
+        it('unpacks structs correctly', () => {
+            const data = [
+                { position: [1, 2, 3], velocity: [4, 5, 6], mass: 10.0 },
+                { position: [0, 0, 0], velocity: [-1, -1, -1], mass: 0.5 }
+            ];
+            const packed = pack(data, Particle);
+            const unpacked = unpack(packed, Particle);
+            expect(unpacked).toEqual(data);
+        });
+
+        const Entity = struct('Entity', {
+            position: 'vec3f',
+            bounds: struct('AABB', {
+                min: 'vec3f',
+                max: 'vec3f',
+            }),
+            id: 'u32',
+        });
+
+        it('unpacks nested structs correctly', () => {
+            const data = [{
+                position: [10, 20, 30],
+                bounds: { min: [0, 0, 0], max: [1, 1, 1] },
+                id: 42,
+            }];
+            const packed = pack(data, Entity);
+            const unpacked = unpack(packed, Entity);
+            expect(unpacked).toEqual(data);
+        });
+    });
+
+    describe('Arrays', () => {
+        const arrType = array('vec2f', 3);
+        it('unpacks fixed-size arrays correctly', () => {
+            const data = [
+                [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]],
+                [[0.0, 0.0], [1.1, 2.2], [-1.0, -2.0]]
+            ];
+            const packed = pack(data, arrType);
+            const unpacked = unpack(packed, arrType) as number[][][];
+
+            expect(unpacked.length).toBe(data.length);
+            for (let i = 0; i < data.length; i++) {
+                expect(unpacked[i].length).toBe(data[i].length);
+                for (let j = 0; j < data[i].length; j++) {
+                    expect(unpacked[i][j][0]).toBeCloseTo(data[i][j][0], 5);
+                    expect(unpacked[i][j][1]).toBeCloseTo(data[i][j][1], 5);
+                }
+            }
+        });
     });
 });

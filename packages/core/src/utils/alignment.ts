@@ -276,3 +276,146 @@ export function getStride(type: TypeDescriptor): number {
 export function getByteLength(count: number, type: TypeDescriptor): number {
     return getStride(type) * count;
 }
+
+/**
+ * Get the appropriate TypedArray constructor for a given descriptor.
+ * Returns undefined for structs (which should be returned as raw ArrayBuffers).
+ */
+export function getTypedArrayForType(
+    type: TypeDescriptor
+): Float32ArrayConstructor | Uint32ArrayConstructor | Int32ArrayConstructor | undefined {
+    if (typeof type === 'string') {
+        const info = getPrimitiveInfo(type);
+        switch (info.baseType) {
+            case 'f32':
+            case 'f16':
+                return Float32Array;
+            case 'u32':
+                return Uint32Array;
+            case 'i32':
+                return Int32Array;
+        }
+    }
+    if (type.kind === 'array') {
+        return getTypedArrayForType(type.elementType);
+    }
+    return undefined; // Struct
+}
+
+/**
+ * Unpack a scalar value from a DataView at the given offset
+ */
+function unpackScalar(view: DataView, offset: number, type: PrimitiveType): number | boolean {
+    const info = getPrimitiveInfo(type);
+    switch (info.baseType) {
+        case 'f32': return view.getFloat32(offset, true);
+        case 'u32': return type === 'bool' ? (view.getUint32(offset, true) !== 0) : view.getUint32(offset, true);
+        case 'i32': return view.getInt32(offset, true);
+        case 'f16': return view.getFloat32(offset, true);
+    }
+}
+
+/**
+ * Unpack a vector value from a DataView at the given offset
+ */
+function unpackVector(view: DataView, offset: number, type: PrimitiveType): number[] {
+    const info = getPrimitiveInfo(type);
+    const componentSize = info.size / info.components;
+    const result: number[] = [];
+
+    for (let i = 0; i < info.components; i++) {
+        const componentOffset = offset + i * componentSize;
+        switch (info.baseType) {
+            case 'f32': result.push(view.getFloat32(componentOffset, true)); break;
+            case 'u32': result.push(view.getUint32(componentOffset, true)); break;
+            case 'i32': result.push(view.getInt32(componentOffset, true)); break;
+            case 'f16': result.push(view.getFloat32(componentOffset, true)); break;
+        }
+    }
+    return result;
+}
+
+/**
+ * Unpack a matrix value from a DataView at the given offset
+ */
+function unpackMatrix(view: DataView, offset: number, type: PrimitiveType): number[] {
+    const match = type.match(/mat(\d)x(\d)f/);
+    if (!match) throw new Error(`Invalid matrix type: ${type}`);
+
+    const cols = parseInt(match[1], 10);
+    const rows = parseInt(match[2], 10);
+    const columnStride = rows <= 2 ? 8 : 16;
+
+    const result: number[] = [];
+    for (let c = 0; c < cols; c++) {
+        const columnOffset = offset + c * columnStride;
+        for (let r = 0; r < rows; r++) {
+            result.push(view.getFloat32(columnOffset + r * 4, true));
+        }
+    }
+    return result;
+}
+
+/**
+ * Unpack a single primitive value
+ */
+function unpackPrimitive(view: DataView, offset: number, type: PrimitiveType): number | boolean | number[] {
+    const info = getPrimitiveInfo(type);
+    if (info.components === 1) return unpackScalar(view, offset, type);
+    if (type.startsWith('mat')) return unpackMatrix(view, offset, type);
+    return unpackVector(view, offset, type);
+}
+
+/**
+ * Unpack a struct value according to its schema
+ */
+function unpackStructValue(view: DataView, offset: number, schema: StructSchema): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    for (const field of schema.fields) {
+        result[field.name] = unpackValue(view, offset + field.offset, field.type);
+    }
+    return result;
+}
+
+/**
+ * Unpack an array of values according to its schema
+ */
+function unpackArrayValue(view: DataView, offset: number, schema: ArraySchema): unknown[] {
+    const result: unknown[] = [];
+    for (let i = 0; i < schema.count; i++) {
+        result.push(unpackValue(view, offset + i * schema.stride, schema.elementType));
+    }
+    return result;
+}
+
+/**
+ * Unpack any value according to its type descriptor
+ */
+function unpackValue(view: DataView, offset: number, type: TypeDescriptor): unknown {
+    if (typeof type === 'string') return unpackPrimitive(view, offset, type as PrimitiveType);
+    if (type.kind === 'struct') return unpackStructValue(view, offset, type);
+    if (type.kind === 'array') return unpackArrayValue(view, offset, type);
+    throw new Error('Invalid type descriptor');
+}
+
+/**
+ * Inverse of pack: unpacks an ArrayBuffer into an array of JavaScript objects/arrays/primitives
+ *
+ * @param buffer - The packed ArrayBuffer from the GPU
+ * @param type - Type descriptor (primitive string, struct, or array schema)
+ * @returns Array of unpacked values
+ */
+export function unpack(buffer: ArrayBuffer, type: TypeDescriptor): unknown[] {
+    const resolved = resolveType(type);
+    const stride = roundUp(resolved.size, resolved.alignment);
+
+    const count = Math.floor(buffer.byteLength / stride);
+    const view = new DataView(buffer);
+    const result: unknown[] = [];
+
+    for (let i = 0; i < count; i++) {
+        result.push(unpackValue(view, i * stride, type));
+    }
+
+    return result;
+}
