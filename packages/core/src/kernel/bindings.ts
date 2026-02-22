@@ -3,6 +3,7 @@
 
 import { Buffer } from '../data/buffer.js';
 import { RawBuffer } from '../data/raw-buffer.js';
+import { resolveConcreteBuffer } from '../graph/compiler.js';
 import { type Handle, isHandle } from '../graph/node.js';
 import type { Kernel } from './kernel.js';
 
@@ -231,7 +232,13 @@ export function resolveDispatch(
 
     // 3. Auto-inference: find the first (and ideally only) buffer binding
     const bufferBindings = Object.entries(bindings).filter(
-        ([, v]) => isBuffer(v) || isRawBuffer(v)
+        ([, v]) => {
+            // also walks the Handle chain if necessary
+            if (resolveConcreteBuffer(v)) {
+                return true;
+            }
+            return false;
+        }
     );
 
     if (bufferBindings.length === 0) {
