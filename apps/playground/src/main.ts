@@ -1,26 +1,16 @@
 import { volten, Buffer, Kernel } from '@volten/core';
 
-let v = await volten();
+const v = await volten();
 
-let k = new Kernel(`
-  fn main(gid: vec3u) {
-    inout[gid.x] = inout[gid.x] * 2.0;
-  }`
-);
+// Buffer has 8 elements, but we only process the first 4
+const buf = new Buffer([1, 2, 3, 4, 100, 100, 100, 100], 'f32', 'rw');
+const k = new Kernel(`
+        fn main(gid: vec3u) {
+          inout[gid.x] = inout[gid.x] * 10.0;
+        }
+      `, { threads: 4 });
+const node = v.pass(k, { inout: buf });
+v.run(node);
+const output = await v.read(node);
 
-let buffer = new Buffer([1, 2, 3, 4], "f32", "rw");
-
-let A = v.pass(k, { inout: buffer });
-let B = v.pass(k, { inout: buffer });
-let C = v.pass(k, { inout: A.inout });
-
-v.run([A, B, C]);
-let result = await v.read(C);
-
-console.log(result);
-
-/*
-
-Uncaught Error: Volten Error: Cannot auto-infer thread count — no buffer bindings found.
-
-*/
+console.log(Array.from(output.inout));
