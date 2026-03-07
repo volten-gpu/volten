@@ -11,7 +11,7 @@ export type { PassOptions } from './context.js';
 export { struct, array } from './types/index.js';
 
 // Data containers
-export { Buffer, RawBuffer } from './data/index.js';
+export { Buffer, RawBuffer, Uniform } from './data/index.js';
 
 // Kernel definition
 export { Kernel } from './kernel/index.js';

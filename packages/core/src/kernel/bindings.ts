@@ -3,9 +3,19 @@
 
 import { Buffer } from '../data/buffer.js';
 import { RawBuffer } from '../data/raw-buffer.js';
+import { Uniform } from '../data/uniform.js';
 import { resolveConcreteBuffer } from '../graph/compiler.js';
 import { type Handle, isHandle } from '../graph/node.js';
+import type { TypeDescriptor } from '../types/schema.js';
+import {
+    generateTypeDeclarations,
+    type BindingTypeInfo,
+} from './type-declarations.js';
 import type { Kernel } from './kernel.js';
+import {
+    type UniformLayoutMode,
+    UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION,
+} from '../utils/uniform-layout.js';
 
 /**
  * A classified binding entry, ready for WGSL generation and GPU bind group creation.
@@ -17,12 +27,16 @@ export interface BindingEntry {
     readonly name: string;
     /** WGSL type string (e.g. "array<f32>") */
     readonly wgslType: string;
-    /** WGSL access qualifier ("read" or "read_write") */
-    readonly wgslAccess: string;
-    /** The source object: Buffer, RawBuffer, or Handle */
-    readonly source: Buffer | RawBuffer | Handle;
+    /** WGSL address space ("storage" or "uniform") */
+    readonly wgslAddressSpace: 'storage' | 'uniform';
+    /** WGSL access qualifier ("read" or "read_write"), storage-only */
+    readonly wgslAccess?: string;
+    /** The source object: Buffer, RawBuffer, Uniform, or Handle */
+    readonly source: Buffer | RawBuffer | Uniform | Handle;
     /** Whether this is a Handle from a previous node */
     readonly isHandle: boolean;
+    /** Optional Volten type descriptor when available (Buffer/Uniform chains) */
+    readonly typeDescriptor?: TypeDescriptor;
 }
 
 /**
@@ -39,25 +53,55 @@ function isRawBuffer(value: unknown): value is RawBuffer {
     return value instanceof RawBuffer;
 }
 
+/**
+ * Check if a value is a Uniform instance.
+ */
+function isUniform(value: unknown): value is Uniform {
+    return value instanceof Uniform;
+}
+
 
 
 /**
  * Resolve the wgslType and wgslAccess from a Handle by walking up the Handle chain.
  * Recursively follows Handle → source node's binding until a concrete Buffer/RawBuffer is found.
  */
-function resolveHandleSource(handle: Handle): { wgslType: string; wgslAccess: string } {
+function resolveHandleSource(
+    handle: Handle
+): {
+    wgslType: string;
+    wgslAddressSpace: 'storage' | 'uniform';
+    wgslAccess?: string;
+    typeDescriptor?: TypeDescriptor;
+} {
     const source = handle._node._bindings[handle._name];
     if (isBuffer(source)) {
-        return { wgslType: source.wgslType, wgslAccess: source.wgslAccess };
+        return {
+            wgslType: source.wgslType,
+            wgslAddressSpace: 'storage',
+            wgslAccess: source.wgslAccess,
+            typeDescriptor: source.type,
+        };
     }
     if (isRawBuffer(source)) {
-        return { wgslType: source.wgslType, wgslAccess: source.wgslAccess };
+        return {
+            wgslType: source.wgslType,
+            wgslAddressSpace: 'storage',
+            wgslAccess: source.wgslAccess,
+        };
+    }
+    if (isUniform(source)) {
+        return {
+            wgslType: source.wgslType,
+            wgslAddressSpace: 'uniform',
+            typeDescriptor: source.type,
+        };
     }
     if (isHandle(source)) {
         return resolveHandleSource(source as Handle);
     }
     throw new Error(
-        `Volten Error: Handle "${handle._name}" does not resolve to a Buffer or RawBuffer.`
+        `Volten Error: Handle "${handle._name}" does not resolve to a Buffer, RawBuffer, or Uniform.`
     );
 }
 
@@ -76,10 +120,12 @@ function resolveHandleSource(handle: Handle): { wgslType: string; wgslAccess: st
  */
 export function generateBindings(
     bindings: Record<string, unknown>,
-    kernel: Kernel
+    kernel: Kernel,
+    options?: { uniformLayoutMode?: UniformLayoutMode }
 ): BindingEntry[] {
     const entries: BindingEntry[] = [];
     let index = 0;
+    const uniformLayoutMode = options?.uniformLayoutMode ?? 'classic';
 
     for (const [name, value] of Object.entries(bindings)) {
         if (isBuffer(value)) {
@@ -87,18 +133,32 @@ export function generateBindings(
                 index: index++,
                 name,
                 wgslType: value.wgslType,
+                wgslAddressSpace: 'storage',
                 wgslAccess: value.wgslAccess,
                 source: value,
                 isHandle: false,
+                typeDescriptor: value.type,
             });
         } else if (isRawBuffer(value)) {
             entries.push({
                 index: index++,
                 name,
                 wgslType: value.wgslType,
+                wgslAddressSpace: 'storage',
                 wgslAccess: value.wgslAccess,
                 source: value,
                 isHandle: false,
+            });
+        } else if (isUniform(value)) {
+            value.setLayoutMode(uniformLayoutMode);
+            entries.push({
+                index: index++,
+                name,
+                wgslType: value.wgslType,
+                wgslAddressSpace: 'uniform',
+                source: value,
+                isHandle: false,
+                typeDescriptor: value.type,
             });
         } else if (isHandle(value)) {
             // Resolve actual type by walking up the Handle chain
@@ -107,9 +167,11 @@ export function generateBindings(
                 index: index++,
                 name,
                 wgslType: resolved.wgslType,
+                wgslAddressSpace: resolved.wgslAddressSpace,
                 wgslAccess: resolved.wgslAccess,
                 source: value,
                 isHandle: true,
+                typeDescriptor: resolved.typeDescriptor,
             });
         } else if (typeof value === 'number') {
             throw new Error(
@@ -120,7 +182,7 @@ export function generateBindings(
         } else {
             throw new Error(
                 `Volten Error: Binding "${name}" has unsupported type: ${typeof value}.\n` +
-                `  Expected: Buffer, RawBuffer, or Handle (output from a previous v.pass()).`
+                `  Expected: Buffer, RawBuffer, Uniform, or Handle (output from a previous v.pass()).`
             );
         }
     }
@@ -142,9 +204,12 @@ export function generateBindingWgsl(entries: BindingEntry[]): string {
     if (entries.length === 0) return '';
 
     return entries
-        .map(entry =>
-            `@group(0) @binding(${entry.index}) var<storage, ${entry.wgslAccess}> ${entry.name}: ${entry.wgslType};`
-        )
+        .map(entry => {
+            if (entry.wgslAddressSpace === 'uniform') {
+                return `@group(0) @binding(${entry.index}) var<uniform> ${entry.name}: ${entry.wgslType};`;
+            }
+            return `@group(0) @binding(${entry.index}) var<storage, ${entry.wgslAccess}> ${entry.name}: ${entry.wgslType};`;
+        })
         .join('\n');
 }
 
@@ -160,16 +225,38 @@ export function generateBindingWgsl(entries: BindingEntry[]): string {
  */
 export function assembleFullShader(
     kernel: Kernel,
-    entries: BindingEntry[]
+    entries: BindingEntry[],
+    options?: { uniformLayoutMode?: UniformLayoutMode }
 ): string {
+    const uniformLayoutMode = options?.uniformLayoutMode ?? 'classic';
+    const bindingTypeInfo: BindingTypeInfo[] = entries.map(entry => ({
+        name: entry.name,
+        wgslAddressSpace: entry.wgslAddressSpace,
+        typeDescriptor: entry.typeDescriptor,
+    }));
+    const typeDeclarations = generateTypeDeclarations(bindingTypeInfo, uniformLayoutMode);
     const bindingWgsl = generateBindingWgsl(entries);
+    const requiresUniformStandardLayout =
+        uniformLayoutMode === 'standard' &&
+        entries.some(entry => entry.wgslAddressSpace === 'uniform');
     const kernelSource = kernel.assembledSource;
 
-    if (!bindingWgsl) {
+    if (!bindingWgsl && !typeDeclarations && !requiresUniformStandardLayout) {
         return kernelSource;
     }
 
-    return `${bindingWgsl}\n\n${kernelSource}`;
+    const sections: string[] = [];
+    if (requiresUniformStandardLayout) {
+        sections.push(`requires ${UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION};`);
+    }
+    if (typeDeclarations) {
+        sections.push(typeDeclarations);
+    }
+    if (bindingWgsl) {
+        sections.push(bindingWgsl);
+    }
+    sections.push(kernelSource);
+    return sections.join('\n\n');
 }
 
 /**

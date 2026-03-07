@@ -47,5 +47,8 @@ export async function volten(options?: VoltenOptions): Promise<VoltenContext> {
         }
     });
 
-    return new VoltenContext(device, { label: options?.label });
+    return new VoltenContext(device, {
+        label: options?.label,
+        uniformLayoutMode: options?.uniformLayoutMode,
+    });
 }

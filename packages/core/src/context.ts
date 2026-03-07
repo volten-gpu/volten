@@ -10,6 +10,14 @@ export interface VoltenOptions {
 
     /** Label for debug purposes */
     label?: string;
+
+    /**
+     * Advanced override for uniform layout strategy.
+     * - auto: use standard layout when extension is available, otherwise classic.
+     * - classic: always use classic uniform constraints.
+     * - standard: require uniform_buffer_standard_layout extension.
+     */
+    uniformLayoutMode?: 'auto' | 'classic' | 'standard';
 }
 
 /**
@@ -42,7 +50,13 @@ import {
 import { compile, type ExecutionPlan } from './graph/compiler.js';
 import { Buffer } from './data/buffer.js';
 import { RawBuffer } from './data/raw-buffer.js';
+import { Uniform } from './data/uniform.js';
 import { getTypedArrayForType } from './utils/alignment.js';
+import {
+    resolveUniformLayoutMode,
+    type UniformLayoutMode,
+    type UniformLayoutPreference,
+} from './utils/uniform-layout.js';
 
 /**
  * Valid targets for reading back data to the CPU.
@@ -61,18 +75,24 @@ export class VoltenContext {
 
     /** Pipeline cache for compute pipelines */
     readonly _pipelineCache: PipelineCache;
+    /** Resolved uniform layout mode for this context */
+    readonly _uniformLayoutMode: UniformLayoutMode;
 
-    constructor(device: GPUDevice, options?: { label?: string }) {
+    constructor(
+        device: GPUDevice,
+        options?: { label?: string; uniformLayoutMode?: UniformLayoutPreference }
+    ) {
         this.device = device;
         this.label = options?.label;
         this._pipelineCache = new PipelineCache();
+        this._uniformLayoutMode = resolveUniformLayoutMode(options?.uniformLayoutMode);
     }
 
     /**
      * Create a compute pass node.
      * 
      * This is the central API for building compute DAGs. It:
-     * 1. Validates and classifies bindings (Buffer, RawBuffer, Handle)
+     * 1. Validates and classifies bindings (Buffer, RawBuffer, Uniform, Handle)
      * 2. Generates WGSL binding declarations
      * 3. Assembles the full shader (bindings + kernel source)
      * 4. Creates or reuses a cached compute pipeline
@@ -80,7 +100,7 @@ export class VoltenContext {
      * 6. Returns a Node with output Handles for DAG chaining
      * 
      * @param kernel - The kernel to execute
-     * @param bindings - Input/output bindings (Buffer, RawBuffer, or Handle from previous pass)
+     * @param bindings - Input/output bindings (Buffer, RawBuffer, Uniform, or Handle from previous pass)
      * @param options - Optional pass configuration (e.g., thread override)
      * @returns A Node handle for chaining or execution
      * 
@@ -101,7 +121,7 @@ export class VoltenContext {
      */
     pass(
         kernel: Kernel,
-        bindings: Record<string, Buffer | RawBuffer | Handle> = {},
+        bindings: Record<string, Buffer | RawBuffer | Uniform | Handle> = {},
         options?: PassOptions
     ): Node {
         // 1. Validate kernel type
@@ -113,10 +133,14 @@ export class VoltenContext {
         }
 
         // 2. Generate binding entries (classify & validate)
-        const bindingEntries = generateBindings(bindings, kernel);
+        const bindingEntries = generateBindings(bindings, kernel, {
+            uniformLayoutMode: this._uniformLayoutMode,
+        });
 
         // 3. Assemble full shader source
-        const shaderCode = assembleFullShader(kernel, bindingEntries);
+        const shaderCode = assembleFullShader(kernel, bindingEntries, {
+            uniformLayoutMode: this._uniformLayoutMode,
+        });
 
         // 4. Get or create pipeline
         const { pipeline, bindGroupLayout } = this._pipelineCache.getOrCreate(
@@ -177,7 +201,10 @@ export class VoltenContext {
     /**
      * Resolve a binding value to its GPUBuffer.
      */
-    private _resolveGPUBuffer(value: Buffer | RawBuffer | Handle): GPUBuffer {
+    private _resolveGPUBuffer(value: Buffer | RawBuffer | Uniform | Handle): GPUBuffer {
+        if (value instanceof Uniform) {
+            return value.ensure(this.device);
+        }
         return this._resolveConcreteBuffer(value).ensure(this.device);
     }
 
@@ -231,7 +258,11 @@ export class VoltenContext {
         for (const node of plan.sorted) {
             // Ensure all Buffer/RawBuffer bindings are uploaded
             for (const entry of node._bindingEntries) {
-                if (entry.source instanceof Buffer || entry.source instanceof RawBuffer) {
+                if (
+                    entry.source instanceof Buffer ||
+                    entry.source instanceof RawBuffer ||
+                    entry.source instanceof Uniform
+                ) {
                     entry.source.ensure(this.device);
                 }
             }

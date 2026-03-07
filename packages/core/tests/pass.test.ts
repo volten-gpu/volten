@@ -20,6 +20,8 @@ import {
 import { Kernel } from '../src/kernel/kernel.js';
 import { Buffer } from '../src/data/buffer.js';
 import { RawBuffer } from '../src/data/raw-buffer.js';
+import { Uniform } from '../src/data/uniform.js';
+import { array, struct } from '../src/types/schema.js';
 import {
     createNode,
     createHandle,
@@ -46,6 +48,10 @@ function makeBuffer(
 
 function makeRawBuffer(size: number = 16, type: string = 'array<f32>'): RawBuffer {
     return new RawBuffer(new ArrayBuffer(size), type);
+}
+
+function makeUniform(data: unknown = 1.0, type: string = 'f32'): Uniform {
+    return new Uniform(data, type as any);
 }
 
 // Helper: create a minimal mock Handle backed by a real Buffer
@@ -97,6 +103,19 @@ describe('Binding Generation', () => {
             expect(entries).toHaveLength(1);
             expect(entries[0].name).toBe('data');
             expect(entries[0].wgslType).toBe('array<vec4f>');
+            expect(entries[0].isHandle).toBe(false);
+        });
+
+        it('classifies a Uniform binding', () => {
+            const kernel = new Kernel('fn main() { }');
+            const uniform = makeUniform([1, 2, 3, 4], 'vec4f');
+            const entries = generateBindings({ transform: uniform }, kernel);
+
+            expect(entries).toHaveLength(1);
+            expect(entries[0].name).toBe('transform');
+            expect(entries[0].wgslType).toBe('vec4f');
+            expect(entries[0].wgslAddressSpace).toBe('uniform');
+            expect(entries[0].wgslAccess).toBeUndefined();
             expect(entries[0].isHandle).toBe(false);
         });
 
@@ -222,6 +241,17 @@ describe('WGSL Binding Declaration Generation', () => {
             expect(generateBindingWgsl([])).toBe('');
         });
 
+        it('generates var<uniform> declaration for Uniform bindings', () => {
+            const kernel = new Kernel('fn main() { }');
+            const scale = makeUniform(2.0, 'f32');
+            const entries = generateBindings({ scale }, kernel);
+            const wgsl = generateBindingWgsl(entries);
+
+            expect(wgsl).toBe(
+                '@group(0) @binding(0) var<uniform> scale: f32;'
+            );
+        });
+
         it('handles vec3f buffer type', () => {
             const kernel = new Kernel('fn main() { }');
             const buf = new Buffer([[1, 2, 3]], 'vec3f' as any, 'r');
@@ -281,6 +311,94 @@ fn main(gid: vec3u) {
             const shader = assembleFullShader(kernel, entries);
 
             expect(shader).toBe(kernel.assembledSource);
+        });
+
+        it('auto-emits struct declarations for struct-typed storage bindings', () => {
+            const kernel = new Kernel('fn main() { }');
+            const Particle = struct('Particle', {
+                mass: 'f32',
+            });
+            const particles = new Buffer([{ mass: 1 }], Particle, 'r');
+            const entries = generateBindings({ particles }, kernel);
+            const shader = assembleFullShader(kernel, entries);
+
+            expect(shader).toContain('struct Particle {');
+            expect(shader).toContain('mass: f32,');
+            expect(shader).toContain('var<storage, read> particles: array<Particle>;');
+        });
+
+        it('emits classic uniform alignment attributes for nested-struct spacing', () => {
+            const kernel = new Kernel('fn main() { }');
+            const S = struct('S', { x: 'f32' });
+            const Params = struct('Params', {
+                a: S,
+                b: 'f32',
+            });
+            const params = new Uniform({ a: { x: 1 }, b: 2 }, Params);
+            const entries = generateBindings({ params }, kernel, {
+                uniformLayoutMode: 'classic',
+            });
+            const shader = assembleFullShader(kernel, entries, {
+                uniformLayoutMode: 'classic',
+            });
+
+            expect(shader).toContain('struct Params {');
+            expect(shader).toContain('@align(16) b: f32,');
+        });
+
+        it('emits extension requirement in standard uniform mode', () => {
+            const kernel = new Kernel('fn main() { }');
+            const S = struct('SStd', { x: 'f32' });
+            const Params = struct('ParamsStd', {
+                a: S,
+                b: 'f32',
+            });
+            const params = new Uniform({ a: { x: 1 }, b: 2 }, Params);
+            const entries = generateBindings({ params }, kernel, {
+                uniformLayoutMode: 'standard',
+            });
+            const shader = assembleFullShader(kernel, entries, {
+                uniformLayoutMode: 'standard',
+            });
+
+            expect(params.byteLength).toBe(8);
+            expect(shader).toContain('requires uniform_buffer_standard_layout;');
+            expect(shader).not.toContain('@align(16) b: f32,');
+        });
+
+        it('throws for classic uniform arrays that require wrapper element types', () => {
+            const kernel = new Kernel('fn main() { }');
+            const Params = struct('ArrayParams', {
+                weights: array('f32', 4),
+            });
+            const params = new Uniform({ weights: [1, 2, 3, 4] }, Params);
+            const entries = generateBindings({ params }, kernel, {
+                uniformLayoutMode: 'classic',
+            });
+
+            expect(() =>
+                assembleFullShader(kernel, entries, { uniformLayoutMode: 'classic' })
+            ).toThrow(/16-byte array stride/);
+        });
+
+        it('throws when one struct name is shared by storage and classic-uniform variants', () => {
+            const kernel = new Kernel('fn main() { }');
+            const SharedS = struct('SharedS', { x: 'f32' });
+            const SharedParams = struct('SharedParams', {
+                a: SharedS,
+                b: 'f32',
+            });
+            const storageData = new Buffer([{ a: { x: 1 }, b: 2 }], SharedParams, 'r');
+            const uniformData = new Uniform({ a: { x: 1 }, b: 2 }, SharedParams);
+            const entries = generateBindings(
+                { storageData, uniformData },
+                kernel,
+                { uniformLayoutMode: 'classic' }
+            );
+
+            expect(() =>
+                assembleFullShader(kernel, entries, { uniformLayoutMode: 'classic' })
+            ).toThrow(/used by both storage and classic-uniform layouts/);
         });
     });
 });
@@ -626,6 +744,26 @@ describe('Node Creation', () => {
             const outputs = getNodeOutputs(node);
             expect(Object.keys(outputs)).toEqual([]);
         });
+
+        it('does not create handles for Uniform bindings', () => {
+            const kernel = new Kernel('fn main() { }');
+            const uniform = makeUniform(2.0, 'f32');
+
+            const node = createNode({
+                kernel,
+                pipeline: mockPipeline,
+                bindGroupLayout: mockLayout,
+                bindingEntries: [],
+                dispatch: [1, 1, 1],
+                bindings: { multiplier: uniform },
+                shaderCode: 'test',
+                dependencies: [],
+            });
+
+            const outputs = getNodeOutputs(node);
+            expect(Object.keys(outputs)).toEqual([]);
+            expect(isBufferLike(uniform)).toBe(false);
+        });
     });
 });
 
@@ -712,6 +850,48 @@ describe('VoltenContext.pass()', () => {
 
         return new VoltenContext(mockDevice);
     }
+
+    it('throws when standard uniform mode is requested without extension support', () => {
+        expect(() => new VoltenContext({} as GPUDevice, {
+            uniformLayoutMode: 'standard',
+        })).toThrow(/requires WGSL extension "uniform_buffer_standard_layout"/);
+    });
+
+    it('auto mode uses standard layout when extension is available', () => {
+        const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+        Object.defineProperty(globalThis, 'navigator', {
+            configurable: true,
+            value: {
+                gpu: {
+                    wgslLanguageFeatures: {
+                        has: (name: string) => name === 'uniform_buffer_standard_layout',
+                    },
+                },
+            },
+        });
+
+        try {
+            const v = createMockVoltenContext();
+            const S = struct('AutoS', { x: 'f32' });
+            const Params = struct('AutoParams', {
+                a: S,
+                b: 'f32',
+            });
+            const params = makeUniform({ a: { x: 1 }, b: 2 }, Params);
+            const kernel = new Kernel('fn main() { }', { threads: 1 });
+            const node = v.pass(kernel, { params });
+
+            expect(node._shaderCode).toContain('requires uniform_buffer_standard_layout;');
+            expect(node._shaderCode).not.toContain('@align(16) b: f32,');
+            expect(params.byteLength).toBe(8);
+        } finally {
+            if (originalNavigatorDescriptor) {
+                Object.defineProperty(globalThis, 'navigator', originalNavigatorDescriptor);
+            } else {
+                delete (globalThis as { navigator?: unknown }).navigator;
+            }
+        }
+    });
 
     it('creates a node from kernel + buffer bindings', () => {
         const v = createMockVoltenContext();
@@ -836,6 +1016,29 @@ fn main(gid: vec3u) {
         // AND kernel logic
         expect(node._shaderCode).toContain('@builtin(global_invocation_id)');
         expect(node._shaderCode).toContain('@compute @workgroup_size(64, 1, 1)');
+    });
+
+    it('supports Uniform bindings in v.pass()', () => {
+        const v = createMockVoltenContext();
+        const input = makeBuffer([1, 2, 3, 4], 'f32', 'r');
+        const output = makeBuffer([0, 0, 0, 0], 'f32', 'rw');
+        const multiplier = makeUniform(2.0, 'f32');
+
+        const kernel = new Kernel(`
+fn main(gid: vec3u) {
+    output[gid.x] = input[gid.x] * multiplier;
+}
+`, { threads: 'input' });
+
+        const node = v.pass(kernel, { input, output, multiplier });
+
+        expect(node._bindingEntries).toHaveLength(3);
+        const uniformEntry = node._bindingEntries.find(e => e.name === 'multiplier');
+        expect(uniformEntry).toBeDefined();
+        expect(uniformEntry!.wgslAddressSpace).toBe('uniform');
+        expect(uniformEntry!.wgslType).toBe('f32');
+        expect(node._shaderCode).toContain('var<uniform> multiplier: f32;');
+        expect((node as any).multiplier).toBeUndefined();
     });
 
     it('handles kernel with no outputs (side-effect only)', () => {

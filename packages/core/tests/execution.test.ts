@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { VoltenContext } from '../src/context.js';
 import { Kernel } from '../src/kernel/kernel.js';
 import { Buffer } from '../src/data/buffer.js';
+import { Uniform } from '../src/data/uniform.js';
 
 // Mock WebGPU globals for Node.js environment
 const GPUBufferUsage = {
@@ -119,6 +120,28 @@ describe('VoltenContext Execution', () => {
         expect(mockOnSubmittedWorkDone).toHaveBeenCalled();
     });
 
+    it('v.run() supports Uniform bindings and creates a uniform GPU buffer', () => {
+        const input = new Buffer([1, 2, 3], 'f32');
+        const output = new Buffer([0, 0, 0], 'f32');
+        const multiplier = new Uniform(2.0, 'f32');
+
+        const K = new Kernel(`
+fn main(gid: vec3u) {
+    output[gid.x] = input[gid.x] * multiplier;
+}
+`, { threads: 'input' });
+
+        const node = v.pass(K, { input, output, multiplier });
+        v.run(node);
+
+        const uniformBufferCall = mockCreateBuffer.mock.calls.find(call => {
+            const desc = call[0];
+            return (desc.usage & GPUBufferUsage.UNIFORM) !== 0;
+        });
+
+        expect(uniformBufferCall).toBeDefined();
+    });
+
     it('v.read() reads back outputs and parses them into TypedArrays based on type', async () => {
         const input = new Buffer([1], 'f32');
         const outputFloat = new Buffer([0], 'f32');
@@ -200,6 +223,21 @@ describe('VoltenContext Execution', () => {
         // E, K, L = 3 dispatches
         expect(mockPassDispatch).toHaveBeenCalledTimes(3);
         expect(mockSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    it('Uniform.set() pushes updates via queue.writeBuffer after upload', () => {
+        const uniform = new Uniform(1.0, 'f32');
+
+        // Not uploaded yet: local update only
+        uniform.set(2.0);
+        expect(mockWriteBuffer).not.toHaveBeenCalled();
+
+        // Upload
+        uniform.ensure(mockDevice);
+
+        // Uploaded: should write to GPU queue
+        uniform.set(3.0);
+        expect(mockWriteBuffer).toHaveBeenCalledTimes(1);
     });
 });
 

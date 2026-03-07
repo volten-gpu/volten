@@ -1,14 +1,17 @@
-import { volten, Buffer, Kernel } from '@volten/core';
+import { struct, volten, Buffer, Kernel } from "@volten/core";
 
 const v = await volten();
 
 // Buffer has 8 elements, but we only process the first 4
-const buf = new Buffer([1, 2, 3, 4, 100, 100, 100, 100], 'f32', 'rw');
-const k = new Kernel(`
+const buf = new Buffer([1, 2, 3, 4, 100, 100, 100, 100], "f32", "rw");
+const k = new Kernel(
+  `
         fn main(gid: vec3u) {
           inout[gid.x] = inout[gid.x] * 10.0;
         }
-      `, { threads: 4 });
+      `,
+  { threads: 4 },
+);
 const node = v.pass(k, { inout: buf });
 v.run(node);
 const output = await v.read(node);
