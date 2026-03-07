@@ -2,14 +2,14 @@
 // Manages structured data with automatic packing
 // Lazy GPU buffer creation
 
-import { type TypeDescriptor, resolveType, getWgslType } from '../types/schema.js';
+import { type TypeDescriptor, getWgslType } from '../types/schema.js';
 import { pack, getStride } from '../utils/alignment.js';
 
 /**
  * Buffer access mode (controls shader access, not CPU access)
  * - "r": Storage buffer that shaders can only read
  * - "rw": Storage buffer that shaders can read and write
- * 
+ *
  * Note: CPU can always write to the buffer via device.queue.writeBuffer()
  * regardless of access mode — this is expected for updating constants.
  */
@@ -17,17 +17,17 @@ export type BufferAccess = 'r' | 'rw';
 
 /**
  * Buffer class for GPU storage buffers
- * 
+ *
  * Handles automatic packing of JavaScript data to WGSL-compatible layout.
  * GPU buffer creation is lazy - call ensure(device) when ready to upload.
- * 
+ *
  * @example
  * // Simple float array
  * const floats = new Buffer([1, 2, 3], "f32");
- * 
+ *
  * // Vector array (note: vec3f has 16-byte stride due to alignment)
  * const positions = new Buffer([[0, 0, 0], [1, 1, 1]], "vec3f");
- * 
+ *
  * // Struct array
  * const Particle = struct("Particle", {
  *   position: "vec3f",
@@ -97,7 +97,7 @@ export class Buffer {
 
     /**
      * Ensure the GPU buffer exists, creating it if necessary
-     * 
+     *
      * @param device - GPUDevice to create the buffer on
      * @returns The GPU buffer
      */
@@ -113,7 +113,7 @@ export class Buffer {
                 GPUBufferUsage.STORAGE |
                 GPUBufferUsage.COPY_SRC |
                 GPUBufferUsage.COPY_DST,
-            mappedAtCreation: true,
+            mappedAtCreation: true
         });
 
         // Copy packed data to GPU

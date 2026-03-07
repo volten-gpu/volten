@@ -4,21 +4,25 @@ import { getStride, pack } from '../src/utils/alignment.js';
 import { Uniform } from '../src/data/uniform.js';
 
 describe('Uniform Layout Rules', () => {
-    it('keeps scalar stride unchanged in uniform address space', () => {
-        expect(getStride('f32', { addressSpace: 'uniform' })).toBe(4);
-        expect(getStride('u32', { addressSpace: 'uniform' })).toBe(4);
+    it('keeps scalar stride unchanged in classic uniform layout', () => {
+        expect(getStride('f32', { layoutRules: 'uniform-classic' })).toBe(4);
+        expect(getStride('u32', { layoutRules: 'uniform-classic' })).toBe(4);
     });
 
-    it('uses 16-byte array element alignment in uniform address space', () => {
+    it('uses 16-byte array element alignment in classic uniform layout', () => {
         const A = array('f32', 2);
 
         // Storage layout: stride 4 for f32 array elements, total 8 bytes.
-        const storagePacked = pack([[1, 2]], A, { addressSpace: 'storage' });
+        const storagePacked = pack([[1, 2]], A, { layoutRules: 'storage' });
         expect(storagePacked.byteLength).toBe(8);
-        expect(Array.from(new Float32Array(storagePacked).slice(0, 2))).toEqual([1, 2]);
+        expect(Array.from(new Float32Array(storagePacked).slice(0, 2))).toEqual(
+            [1, 2]
+        );
 
-        // Uniform layout: f32 array elements aligned to 16-byte boundaries.
-        const uniformPacked = pack([[1, 2]], A, { addressSpace: 'uniform' });
+        // Classic uniform layout: f32 array elements aligned to 16-byte boundaries.
+        const uniformPacked = pack([[1, 2]], A, {
+            layoutRules: 'uniform-classic'
+        });
         expect(uniformPacked.byteLength).toBe(32);
 
         const floats = new Float32Array(uniformPacked);
@@ -28,15 +32,15 @@ describe('Uniform Layout Rules', () => {
 
     it('applies struct-member spacing rule in uniform layout', () => {
         const S = struct('S', {
-            x: 'f32',
+            x: 'f32'
         });
         const Outer = struct('Outer', {
             a: S,
-            b: 'f32',
+            b: 'f32'
         });
 
         const storagePacked = pack([{ a: { x: 10 }, b: 20 }], Outer, {
-            addressSpace: 'storage',
+            layoutRules: 'storage'
         });
         const storageFloats = new Float32Array(storagePacked);
         expect(storagePacked.byteLength).toBe(8);
@@ -44,7 +48,7 @@ describe('Uniform Layout Rules', () => {
         expect(storageFloats[1]).toBe(20); // offset 4 bytes
 
         const uniformPacked = pack([{ a: { x: 10 }, b: 20 }], Outer, {
-            addressSpace: 'uniform',
+            layoutRules: 'uniform-classic'
         });
         const uniformFloats = new Float32Array(uniformPacked);
         expect(uniformPacked.byteLength).toBe(32);
@@ -54,11 +58,11 @@ describe('Uniform Layout Rules', () => {
 
     it('Uniform uses uniform-aware layout calculations', () => {
         const S = struct('S', {
-            x: 'f32',
+            x: 'f32'
         });
         const Outer = struct('Outer', {
             a: S,
-            b: 'f32',
+            b: 'f32'
         });
 
         const u = new Uniform({ a: { x: 3 }, b: 7 }, Outer);
@@ -69,4 +73,3 @@ describe('Uniform Layout Rules', () => {
         expect(floats[4]).toBe(7);
     });
 });
-

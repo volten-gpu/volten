@@ -2,12 +2,12 @@ import {
     type ArraySchema,
     getWgslType,
     type StructSchema,
-    type TypeDescriptor,
+    type TypeDescriptor
 } from '../types/schema.js';
 import {
     computeTypeLayout,
     elementStrideOf,
-    type StructLayout,
+    type StructLayout
 } from '../utils/layout.js';
 import type { UniformLayoutMode } from '../utils/uniform-layout.js';
 
@@ -46,7 +46,8 @@ export function generateTypeDeclarations(
         }
 
         const variant: StructVariant =
-            binding.wgslAddressSpace === 'uniform' && uniformLayoutMode === 'classic'
+            binding.wgslAddressSpace === 'uniform' &&
+            uniformLayoutMode === 'classic'
                 ? 'uniform-classic'
                 : 'natural';
 
@@ -87,7 +88,13 @@ function visitTypeDescriptor(
 
     if (type.kind === 'array') {
         validateClassicUniformArray(type, variant, bindingName, path);
-        visitTypeDescriptor(type.elementType, variant, bindingName, `${path}[]`, structsByName);
+        visitTypeDescriptor(
+            type.elementType,
+            variant,
+            bindingName,
+            `${path}[]`,
+            structsByName
+        );
         return;
     }
 
@@ -121,16 +128,16 @@ function registerStructVariant(
     if (existing.schema !== schema) {
         throw new Error(
             `Volten Error: Struct name collision for "${schema.name}".\n` +
-            `  Found multiple schema objects with the same name while processing binding "${bindingName}" at "${path}".\n` +
-            '  Hint: use unique struct names to avoid ambiguous WGSL declarations.'
+                `  Found multiple schema objects with the same name while processing binding "${bindingName}" at "${path}".\n` +
+                '  Hint: use unique struct names to avoid ambiguous WGSL declarations.'
         );
     }
 
     if (existing.variant !== variant) {
         throw new Error(
             `Volten Error: Struct "${schema.name}" is used by both storage and classic-uniform layouts in one shader.\n` +
-            `  Binding "${bindingName}" at "${path}" requires ${variant}, but previous usage requires ${existing.variant}.\n` +
-            '  Hint: use separate schema names for storage vs uniform, or run with uniform_buffer_standard_layout.'
+                `  Binding "${bindingName}" at "${path}" requires ${variant}, but previous usage requires ${existing.variant}.\n` +
+                '  Hint: use separate schema names for storage vs uniform, or run with uniform_buffer_standard_layout.'
         );
     }
 }
@@ -152,9 +159,9 @@ function validateClassicUniformArray(
 
     throw new Error(
         `Volten Error: Uniform binding "${bindingName}" contains "${path}" with element stride ${naturalStride} bytes.\n` +
-        '  Classic uniform layout requires 16-byte array stride, which would need wrapper element types.\n' +
-        '  Volten cannot auto-generate those wrappers without changing field-access semantics.\n' +
-        '  Hint: enable uniform_buffer_standard_layout (auto/standard mode), redesign the uniform type, or use RawBuffer.'
+            '  Classic uniform layout requires 16-byte array stride, which would need wrapper element types.\n' +
+            '  Volten cannot auto-generate those wrappers without changing field-access semantics.\n' +
+            '  Hint: enable uniform_buffer_standard_layout (auto/standard mode), redesign the uniform type, or use RawBuffer.'
     );
 }
 
@@ -202,7 +209,10 @@ function collectStructDependencies(schema: StructSchema): string[] {
     return [...deps];
 }
 
-function collectStructDependenciesFromType(type: TypeDescriptor, deps: Set<string>): void {
+function collectStructDependenciesFromType(
+    type: TypeDescriptor,
+    deps: Set<string>
+): void {
     if (typeof type === 'string') {
         return;
     }
@@ -229,7 +239,10 @@ function renderNaturalStruct(schema: StructSchema): string {
 }
 
 function renderClassicUniformStruct(schema: StructSchema): string {
-    const uniformLayout = computeTypeLayout(schema, 'uniform') as StructLayout;
+    const uniformLayout = computeTypeLayout(
+        schema,
+        'uniform-classic'
+    ) as StructLayout;
     const naturalLayout = computeTypeLayout(schema, 'storage') as StructLayout;
 
     const naturalOffsetsByName = new Map<string, number>();
@@ -240,7 +253,9 @@ function renderClassicUniformStruct(schema: StructSchema): string {
     const lines: string[] = [];
     lines.push(`struct ${schema.name} {`);
     for (const field of schema.fields) {
-        const uniformField = uniformLayout.fields.find(f => f.name === field.name);
+        const uniformField = uniformLayout.fields.find(
+            (f) => f.name === field.name
+        );
         if (!uniformField) {
             throw new Error(
                 `Volten Error: Failed to resolve uniform layout field "${field.name}" in struct "${schema.name}".`
@@ -255,4 +270,3 @@ function renderClassicUniformStruct(schema: StructSchema): string {
     lines.push('};');
     return lines.join('\n');
 }
-

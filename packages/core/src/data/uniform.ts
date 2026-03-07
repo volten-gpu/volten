@@ -4,8 +4,8 @@
 import { type TypeDescriptor, getWgslType } from '../types/schema.js';
 import { pack } from '../utils/alignment.js';
 import {
-    getUniformPackingAddressSpace,
-    type UniformLayoutMode,
+    getUniformPackingLayoutRules,
+    type UniformLayoutMode
 } from '../utils/uniform-layout.js';
 
 /**
@@ -42,10 +42,7 @@ export class Uniform {
     /** Device used to upload this uniform (captured on first ensure) */
     private device: GPUDevice | null = null;
 
-    constructor(
-        data: unknown,
-        type: TypeDescriptor
-    ) {
+    constructor(data: unknown, type: TypeDescriptor) {
         this.type = type;
         this.value = data;
         this.packedData = this.packOne(data);
@@ -154,7 +151,7 @@ export class Uniform {
      */
     private packOne(data: unknown): ArrayBuffer {
         return pack([data], this.type, {
-            addressSpace: getUniformPackingAddressSpace(this.layoutMode),
+            layoutRules: getUniformPackingLayoutRules(this.layoutMode)
         });
     }
 
@@ -179,7 +176,7 @@ export class Uniform {
         const buffer = device.createBuffer({
             size: this.byteLength,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-            mappedAtCreation: true,
+            mappedAtCreation: true
         });
 
         const mapped = new Uint8Array(buffer.getMappedRange());

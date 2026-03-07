@@ -1,13 +1,28 @@
 /**
  * Comprehensive tests for buffer packing logic.
- * 
+ *
  * These tests verify that JavaScript data is correctly packed into
  * WGSL-compatible binary format with proper alignment and padding.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
-import { pack, unpack, getStride, roundUp, getByteLength } from '../src/utils/alignment.js';
-import { struct, array, resolveType, getWgslType } from '../src/types/schema.js';
-import { PRIMITIVE_INFO, isPrimitiveType, getPrimitiveInfo } from '../src/types/primitives.js';
+import { describe, it, expect } from 'vitest';
+import {
+    pack,
+    unpack,
+    getStride,
+    roundUp,
+    getByteLength
+} from '../src/utils/alignment.js';
+import { struct, array, getWgslType } from '../src/types/schema.js';
+import {
+    PRIMITIVE_INFO,
+    isPrimitiveType,
+    getPrimitiveInfo
+} from '../src/types/primitives.js';
+import {
+    computeTypeLayout,
+    type ArrayLayout,
+    type StructLayout
+} from '../src/utils/layout.js';
 
 /**
  * Helper to read float values from packed buffer
@@ -38,6 +53,16 @@ function readInts(buffer: ArrayBuffer, count: number): number[] {
  */
 function readBytes(buffer: ArrayBuffer): number[] {
     return Array.from(new Uint8Array(buffer));
+}
+
+function getStorageStructLayout(
+    schema: ReturnType<typeof struct>
+): StructLayout {
+    return computeTypeLayout(schema, 'storage') as StructLayout;
+}
+
+function getStorageArrayLayout(schema: ReturnType<typeof array>): ArrayLayout {
+    return computeTypeLayout(schema, 'storage') as ArrayLayout;
 }
 
 // =============================================================================
@@ -116,7 +141,13 @@ describe('Vector Packing', () => {
         });
 
         it('packs multiple vec2f values', () => {
-            const packed = pack([[1.0, 2.0], [3.0, 4.0]], 'vec2f');
+            const packed = pack(
+                [
+                    [1.0, 2.0],
+                    [3.0, 4.0]
+                ],
+                'vec2f'
+            );
             expect(packed.byteLength).toBe(16);
             expect(readFloats(packed, 4)).toEqual([1.0, 2.0, 3.0, 4.0]);
         });
@@ -146,7 +177,13 @@ describe('Vector Packing', () => {
         });
 
         it('packs multiple vec3f with 16-byte stride', () => {
-            const packed = pack([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], 'vec3f');
+            const packed = pack(
+                [
+                    [1.0, 2.0, 3.0],
+                    [4.0, 5.0, 6.0]
+                ],
+                'vec3f'
+            );
             expect(packed.byteLength).toBe(32); // 2 * 16 bytes stride
 
             const view = new Float32Array(packed);
@@ -207,10 +244,22 @@ describe('Matrix Packing', () => {
         it('packs identity matrix correctly (column-major)', () => {
             // Identity matrix as flat column-major array
             const identity = [
-                1, 0, 0, 0,  // Column 0
-                0, 1, 0, 0,  // Column 1
-                0, 0, 1, 0,  // Column 2
-                0, 0, 0, 1,  // Column 3
+                1,
+                0,
+                0,
+                0, // Column 0
+                0,
+                1,
+                0,
+                0, // Column 1
+                0,
+                0,
+                1,
+                0, // Column 2
+                0,
+                0,
+                0,
+                1 // Column 3
             ];
             const packed = pack([identity], 'mat4x4f');
             expect(packed.byteLength).toBe(64);
@@ -219,10 +268,22 @@ describe('Matrix Packing', () => {
 
         it('packs matrix with meaningful values', () => {
             const matrix = [
-                1, 2, 3, 4,     // Column 0
-                5, 6, 7, 8,     // Column 1
-                9, 10, 11, 12,  // Column 2
-                13, 14, 15, 16, // Column 3
+                1,
+                2,
+                3,
+                4, // Column 0
+                5,
+                6,
+                7,
+                8, // Column 1
+                9,
+                10,
+                11,
+                12, // Column 2
+                13,
+                14,
+                15,
+                16 // Column 3
             ];
             const packed = pack([matrix], 'mat4x4f');
             expect(readFloats(packed, 16)).toEqual(matrix);
@@ -238,9 +299,15 @@ describe('Matrix Packing', () => {
         it('packs mat3x3f with column padding', () => {
             // 9 values, but each column of 3 values needs 16 bytes
             const matrix = [
-                1, 2, 3,     // Column 0 (needs 16 bytes)
-                4, 5, 6,     // Column 1 (needs 16 bytes)
-                7, 8, 9,     // Column 2 (needs 16 bytes)
+                1,
+                2,
+                3, // Column 0 (needs 16 bytes)
+                4,
+                5,
+                6, // Column 1 (needs 16 bytes)
+                7,
+                8,
+                9 // Column 2 (needs 16 bytes)
             ];
             const packed = pack([matrix], 'mat3x3f');
             expect(packed.byteLength).toBe(48);
@@ -277,28 +344,31 @@ describe('Struct Schema', () => {
     describe('struct() creation', () => {
         it('creates a simple struct with correct layout', () => {
             const Simple = struct('Simple', { x: 'f32', y: 'f32' });
+            const layout = getStorageStructLayout(Simple);
             expect(Simple.kind).toBe('struct');
             expect(Simple.fields).toHaveLength(2);
-            expect(Simple.size).toBe(8);
-            expect(Simple.alignment).toBe(4);
+            expect(layout.size).toBe(8);
+            expect(layout.align).toBe(4);
         });
 
         it('calculates field offsets correctly', () => {
             const Point = struct('Point', { x: 'f32', y: 'f32', z: 'f32' });
-            expect(Point.fields[0].offset).toBe(0);
-            expect(Point.fields[1].offset).toBe(4);
-            expect(Point.fields[2].offset).toBe(8);
+            const layout = getStorageStructLayout(Point);
+            expect(layout.fields[0].offset).toBe(0);
+            expect(layout.fields[1].offset).toBe(4);
+            expect(layout.fields[2].offset).toBe(8);
         });
 
         it('handles alignment padding between fields', () => {
             // f32 followed by vec3f: the vec3f needs 16-byte alignment
             const Mixed = struct('Mixed', {
-                scalar: 'f32',   // 4 bytes at offset 0
-                vector: 'vec3f'  // needs 16-byte alignment, so offset 16
+                scalar: 'f32', // 4 bytes at offset 0
+                vector: 'vec3f' // needs 16-byte alignment, so offset 16
             });
-            expect(Mixed.fields[0].offset).toBe(0);
-            expect(Mixed.fields[1].offset).toBe(16); // Padded to 16-byte boundary
-            expect(Mixed.size).toBe(32); // 16 + 12 = 28, rounded up to 32 for alignment
+            const layout = getStorageStructLayout(Mixed);
+            expect(layout.fields[0].offset).toBe(0);
+            expect(layout.fields[1].offset).toBe(16); // Padded to 16-byte boundary
+            expect(layout.size).toBe(32); // 16 + 12 = 28, rounded up to 32 for alignment
         });
 
         it('stores the name', () => {
@@ -309,16 +379,17 @@ describe('Struct Schema', () => {
 
     describe('Particle struct (realistic use case)', () => {
         const Particle = struct('Particle', {
-            position: 'vec3f',  // 12 bytes, 16-byte aligned -> offset 0
-            velocity: 'vec3f',  // 12 bytes, 16-byte aligned -> offset 16
-            mass: 'f32',        // 4 bytes, 4-byte aligned -> offset 28
+            position: 'vec3f', // 12 bytes, 16-byte aligned -> offset 0
+            velocity: 'vec3f', // 12 bytes, 16-byte aligned -> offset 16
+            mass: 'f32' // 4 bytes, 4-byte aligned -> offset 28
         });
 
         it('has correct total size with alignment', () => {
+            const layout = getStorageStructLayout(Particle);
             // position: 0-12, velocity: 16-28, mass: 28-32
             // Total: 32 bytes, struct alignment: 16
-            expect(Particle.size).toBe(32);
-            expect(Particle.alignment).toBe(16);
+            expect(layout.size).toBe(32);
+            expect(layout.align).toBe(16);
         });
 
         it('packs particle data correctly', () => {
@@ -359,35 +430,39 @@ describe('Struct Schema', () => {
     describe('Nested structs', () => {
         const AABB = struct('AABB', {
             min: 'vec3f',
-            max: 'vec3f',
+            max: 'vec3f'
         });
 
         const Entity = struct('Entity', {
             position: 'vec3f',
             bounds: AABB,
-            id: 'u32',
+            id: 'u32'
         });
 
         it('calculates nested struct layout correctly', () => {
+            const aabbLayout = getStorageStructLayout(AABB);
+            const entityLayout = getStorageStructLayout(Entity);
             // AABB: min at 0-12, max at 16-28, size 32, align 16
-            expect(AABB.size).toBe(32);
-            expect(AABB.alignment).toBe(16);
+            expect(aabbLayout.size).toBe(32);
+            expect(aabbLayout.align).toBe(16);
 
             // Entity: position at 0-12 (align 16)
             //         bounds at 16 (AABB needs 16-align), size 32
             //         id at 48, size 4
             //         Total: 52, rounded to 64 for alignment
-            expect(Entity.fields[0].offset).toBe(0);  // position
-            expect(Entity.fields[1].offset).toBe(16); // bounds (AABB)
-            expect(Entity.fields[2].offset).toBe(48); // id
+            expect(entityLayout.fields[0].offset).toBe(0); // position
+            expect(entityLayout.fields[1].offset).toBe(16); // bounds (AABB)
+            expect(entityLayout.fields[2].offset).toBe(48); // id
         });
 
         it('packs nested struct data correctly', () => {
-            const data = [{
-                position: [10, 20, 30],
-                bounds: { min: [0, 0, 0], max: [1, 1, 1] },
-                id: 42,
-            }];
+            const data = [
+                {
+                    position: [10, 20, 30],
+                    bounds: { min: [0, 0, 0], max: [1, 1, 1] },
+                    id: 42
+                }
+            ];
             const packed = pack(data, Entity);
 
             const floatView = new Float32Array(packed);
@@ -422,17 +497,19 @@ describe('Array Schema', () => {
     describe('array() creation', () => {
         it('creates array of primitives', () => {
             const arr = array('f32', 10);
+            const layout = getStorageArrayLayout(arr);
             expect(arr.kind).toBe('array');
             expect(arr.count).toBe(10);
-            expect(arr.stride).toBe(4);
-            expect(arr.size).toBe(40);
+            expect(layout.stride).toBe(4);
+            expect(layout.size).toBe(40);
         });
 
         it('creates array of vectors with correct stride', () => {
             const arr = array('vec3f', 5);
-            expect(arr.stride).toBe(16); // vec3f has 16-byte stride
-            expect(arr.size).toBe(80);
-            expect(arr.alignment).toBe(16);
+            const layout = getStorageArrayLayout(arr);
+            expect(layout.stride).toBe(16); // vec3f has 16-byte stride
+            expect(layout.size).toBe(80);
+            expect(layout.align).toBe(16);
         });
 
         it('throws for invalid count', () => {
@@ -445,24 +522,27 @@ describe('Array Schema', () => {
     describe('struct with fixed-size array field', () => {
         const GridCell = struct('GridCell', {
             neighbors: array('u32', 8),
-            temperature: 'f32',
+            temperature: 'f32'
         });
 
         it('calculates layout with array field', () => {
+            const layout = getStorageStructLayout(GridCell);
             // neighbors: 8 * 4 = 32 bytes at offset 0
             // temperature: 4 bytes at offset 32
             // Total: 36, alignment 4
-            expect(GridCell.fields[0].offset).toBe(0);
-            expect(GridCell.fields[0].size).toBe(32);
-            expect(GridCell.fields[1].offset).toBe(32);
-            expect(GridCell.size).toBe(36);
+            expect(layout.fields[0].offset).toBe(0);
+            expect(layout.fields[0].layout.size).toBe(32);
+            expect(layout.fields[1].offset).toBe(32);
+            expect(layout.size).toBe(36);
         });
 
         it('packs struct with array field correctly', () => {
-            const data = [{
-                neighbors: [0, 1, 2, 3, 4, 5, 6, 7],
-                temperature: 98.6,
-            }];
+            const data = [
+                {
+                    neighbors: [0, 1, 2, 3, 4, 5, 6, 7],
+                    temperature: 98.6
+                }
+            ];
             const packed = pack(data, GridCell);
 
             const uintView = new Uint32Array(packed);
@@ -478,9 +558,10 @@ describe('Array Schema', () => {
         const matrix3x3 = array(array('f32', 3), 3);
 
         it('creates nested array schema', () => {
+            const layout = getStorageArrayLayout(matrix3x3);
             expect(matrix3x3.count).toBe(3);
-            expect(matrix3x3.stride).toBe(12); // inner array of 3 f32s
-            expect(matrix3x3.size).toBe(36);
+            expect(layout.stride).toBe(12); // inner array of 3 f32s
+            expect(layout.size).toBe(36);
         });
     });
 });
@@ -532,22 +613,24 @@ describe('Utility Functions', () => {
         });
     });
 
-    describe('resolveType()', () => {
-        it('resolves primitive types', () => {
-            const resolved = resolveType('f32');
-            expect(resolved.size).toBe(4);
-            expect(resolved.alignment).toBe(4);
+    describe('computeTypeLayout()', () => {
+        it('computes primitive layouts', () => {
+            const layout = computeTypeLayout('f32', 'storage');
+            expect(layout.size).toBe(4);
+            expect(layout.align).toBe(4);
         });
 
-        it('resolves struct types', () => {
+        it('computes struct layouts from declarative schemas', () => {
             const S = struct('S', { x: 'vec3f' });
-            const resolved = resolveType(S);
-            expect(resolved.size).toBe(S.size);
-            expect(resolved.alignment).toBe(S.alignment);
+            const layout = getStorageStructLayout(S);
+            expect(layout.size).toBe(16);
+            expect(layout.align).toBe(16);
         });
 
-        it('throws for unknown type', () => {
-            expect(() => resolveType('unknown_type' as any)).toThrow();
+        it('schema builders still reject unknown types', () => {
+            expect(() =>
+                struct('Broken', { value: 'unknown_type' as any })
+            ).toThrow();
         });
     });
 
@@ -642,7 +725,10 @@ describe('Unpacking', () => {
         });
 
         it('unpacks vec3f correctly', () => {
-            const data = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
+            const data = [
+                [1.0, 2.0, 3.0],
+                [4.0, 5.0, 6.0]
+            ];
             const packed = pack(data, 'vec3f');
             const unpacked = unpack(packed, 'vec3f');
             expect(unpacked).toEqual(data);
@@ -650,10 +736,7 @@ describe('Unpacking', () => {
 
         it('unpacks mat4x4f correctly', () => {
             const matrix = [
-                1, 2, 3, 4,
-                5, 6, 7, 8,
-                9, 10, 11, 12,
-                13, 14, 15, 16,
+                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16
             ];
             const packed = pack([matrix], 'mat4x4f');
             const unpacked = unpack(packed, 'mat4x4f');
@@ -672,7 +755,7 @@ describe('Unpacking', () => {
         const Particle = struct('Particle', {
             position: 'vec3f',
             velocity: 'vec3f',
-            mass: 'f32',
+            mass: 'f32'
         });
 
         it('unpacks structs correctly', () => {
@@ -689,17 +772,19 @@ describe('Unpacking', () => {
             position: 'vec3f',
             bounds: struct('AABB', {
                 min: 'vec3f',
-                max: 'vec3f',
+                max: 'vec3f'
             }),
-            id: 'u32',
+            id: 'u32'
         });
 
         it('unpacks nested structs correctly', () => {
-            const data = [{
-                position: [10, 20, 30],
-                bounds: { min: [0, 0, 0], max: [1, 1, 1] },
-                id: 42,
-            }];
+            const data = [
+                {
+                    position: [10, 20, 30],
+                    bounds: { min: [0, 0, 0], max: [1, 1, 1] },
+                    id: 42
+                }
+            ];
             const packed = pack(data, Entity);
             const unpacked = unpack(packed, Entity);
             expect(unpacked).toEqual(data);
@@ -710,8 +795,16 @@ describe('Unpacking', () => {
         const arrType = array('vec2f', 3);
         it('unpacks fixed-size arrays correctly', () => {
             const data = [
-                [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]],
-                [[0.0, 0.0], [1.1, 2.2], [-1.0, -2.0]]
+                [
+                    [1.0, 2.0],
+                    [3.0, 4.0],
+                    [5.0, 6.0]
+                ],
+                [
+                    [0.0, 0.0],
+                    [1.1, 2.2],
+                    [-1.0, -2.0]
+                ]
             ];
             const packed = pack(data, arrType);
             const unpacked = unpack(packed, arrType) as number[][][];

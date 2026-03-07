@@ -1,23 +1,29 @@
 import {
     type PrimitiveType,
     getPrimitiveInfo,
-    PRIMITIVE_INFO,
+    PRIMITIVE_INFO
 } from '../types/primitives.js';
 import { type TypeDescriptor } from '../types/schema.js';
 import {
     computeTypeLayout,
     elementStrideOf,
     roundUp as roundUpInternal,
-    type AddressSpace,
-    type TypeLayout,
+    type LayoutRules,
+    type TypeLayout
 } from './layout.js';
 
 export interface LayoutOptions {
-    addressSpace?: AddressSpace;
+    /**
+     * Explicit packing rules to apply.
+     *
+     * `storage` is also the rule set used for uniforms when
+     * `uniform_buffer_standard_layout` is enabled.
+     */
+    layoutRules?: LayoutRules;
 }
 
-function resolveAddressSpace(options?: LayoutOptions): AddressSpace {
-    return options?.addressSpace ?? 'storage';
+function resolveLayoutRules(options?: LayoutOptions): LayoutRules {
+    return options?.layoutRules ?? 'storage';
 }
 
 /**
@@ -128,7 +134,8 @@ function packMatrix(
         const columnOffset = offset + c * columnStride;
         for (let r = 0; r < rows; r++) {
             const valueIndex = c * rows + r;
-            const val = valueIndex < flatValues.length ? flatValues[valueIndex] : 0;
+            const val =
+                valueIndex < flatValues.length ? flatValues[valueIndex] : 0;
             view.setFloat32(columnOffset + r * 4, val, true);
         }
     }
@@ -177,7 +184,12 @@ function packValueWithLayout(
             if (fieldValue === undefined) {
                 continue;
             }
-            packValueWithLayout(view, offset + field.offset, fieldValue, field.layout);
+            packValueWithLayout(
+                view,
+                offset + field.offset,
+                fieldValue,
+                field.layout
+            );
         }
         return;
     }
@@ -203,9 +215,9 @@ export function pack(
     type: TypeDescriptor,
     options?: LayoutOptions
 ): ArrayBuffer {
-    const addressSpace = resolveAddressSpace(options);
-    const elementLayout = computeTypeLayout(type, addressSpace);
-    const elementStride = elementStrideOf(type, addressSpace);
+    const layoutRules = resolveLayoutRules(options);
+    const elementLayout = computeTypeLayout(type, layoutRules);
+    const elementStride = elementStrideOf(type, layoutRules);
     const byteLength = elementStride * data.length;
 
     const buffer = new ArrayBuffer(byteLength);
@@ -225,7 +237,7 @@ export function getStride(
     type: TypeDescriptor,
     options?: LayoutOptions
 ): number {
-    return elementStrideOf(type, resolveAddressSpace(options));
+    return elementStrideOf(type, resolveLayoutRules(options));
 }
 
 /**
@@ -245,7 +257,11 @@ export function getByteLength(
  */
 export function getTypedArrayForType(
     type: TypeDescriptor
-): Float32ArrayConstructor | Uint32ArrayConstructor | Int32ArrayConstructor | undefined {
+):
+    | Float32ArrayConstructor
+    | Uint32ArrayConstructor
+    | Int32ArrayConstructor
+    | undefined {
     if (typeof type === 'string') {
         const info = getPrimitiveInfo(type);
         switch (info.baseType) {
@@ -264,13 +280,19 @@ export function getTypedArrayForType(
     return undefined;
 }
 
-function unpackScalar(view: DataView, offset: number, type: PrimitiveType): number | boolean {
+function unpackScalar(
+    view: DataView,
+    offset: number,
+    type: PrimitiveType
+): number | boolean {
     const info = getPrimitiveInfo(type);
     switch (info.baseType) {
         case 'f32':
             return view.getFloat32(offset, true);
         case 'u32':
-            return type === 'bool' ? view.getUint32(offset, true) !== 0 : view.getUint32(offset, true);
+            return type === 'bool'
+                ? view.getUint32(offset, true) !== 0
+                : view.getUint32(offset, true);
         case 'i32':
             return view.getInt32(offset, true);
         case 'f16':
@@ -278,7 +300,11 @@ function unpackScalar(view: DataView, offset: number, type: PrimitiveType): numb
     }
 }
 
-function unpackVector(view: DataView, offset: number, type: PrimitiveType): number[] {
+function unpackVector(
+    view: DataView,
+    offset: number,
+    type: PrimitiveType
+): number[] {
     const info = getPrimitiveInfo(type);
     const componentSize = info.size / info.components;
     const result: number[] = [];
@@ -304,7 +330,11 @@ function unpackVector(view: DataView, offset: number, type: PrimitiveType): numb
     return result;
 }
 
-function unpackMatrix(view: DataView, offset: number, type: PrimitiveType): number[] {
+function unpackMatrix(
+    view: DataView,
+    offset: number,
+    type: PrimitiveType
+): number[] {
     const match = type.match(/mat(\d)x(\d)(f|h)/);
     if (!match) {
         throw new Error(`Invalid matrix type: ${type}`);
@@ -324,7 +354,11 @@ function unpackMatrix(view: DataView, offset: number, type: PrimitiveType): numb
     return result;
 }
 
-function unpackPrimitive(view: DataView, offset: number, type: PrimitiveType): number | boolean | number[] {
+function unpackPrimitive(
+    view: DataView,
+    offset: number,
+    type: PrimitiveType
+): number | boolean | number[] {
     const info = getPrimitiveInfo(type);
     if (info.components === 1) return unpackScalar(view, offset, type);
     if (type.startsWith('mat')) return unpackMatrix(view, offset, type);
@@ -343,7 +377,11 @@ function unpackValueWithLayout(
     if (layout.kind === 'struct') {
         const out: Record<string, unknown> = {};
         for (const field of layout.fields) {
-            out[field.name] = unpackValueWithLayout(view, offset + field.offset, field.layout);
+            out[field.name] = unpackValueWithLayout(
+                view,
+                offset + field.offset,
+                field.layout
+            );
         }
         return out;
     }
@@ -362,16 +400,17 @@ function unpackValueWithLayout(
 }
 
 /**
- * Inverse of pack: unpacks an ArrayBuffer into JavaScript values.
+ * Inverse of pack: decode a mapped GPU buffer or any packed ArrayBuffer back
+ * into structured JavaScript values using the same layout rules.
  */
 export function unpack(
     buffer: ArrayBuffer,
     type: TypeDescriptor,
     options?: LayoutOptions
 ): unknown[] {
-    const addressSpace = resolveAddressSpace(options);
-    const layout = computeTypeLayout(type, addressSpace);
-    const stride = elementStrideOf(type, addressSpace);
+    const layoutRules = resolveLayoutRules(options);
+    const layout = computeTypeLayout(type, layoutRules);
+    const stride = elementStrideOf(type, layoutRules);
     const count = Math.floor(buffer.byteLength / stride);
 
     const view = new DataView(buffer);
