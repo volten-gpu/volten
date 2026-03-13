@@ -113,7 +113,7 @@ export class VoltenContext {
      *   fn main(gid: vec3u) {
      *     output[gid.x] = input[gid.x] * 2.0;
      *   }
-     * `, { outputs: ['output'], threads: 'input' }), { input, output });
+     * `, { threads: 'input' }), { input, output });
      * 
      * // Chain passes:
      * const B = v.pass(AnotherKernel, { data: A.output, result: resultBuf });
