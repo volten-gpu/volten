@@ -48,19 +48,15 @@ export function isBufferLike(value: unknown): value is Buffer | RawBuffer | Hand
 // Output handles are spread directly onto the Node for API terseness:
 //
 //   const A = v.pass(K1, { in: input });
-//   const B = v.pass(K2, { in: A.output });  // ✅ Direct access
-//
-// Instead of the more verbose:
-//
-//   const B = v.pass(K2, { in: A.outputs.output });  // ❌ Extra indirection
+//   const B = v.pass(K2, { in: A.output });  
 //
 // Convention:
 // - Internal properties are prefixed with "_" (e.g., _id, _dependencies)
 // - User-facing output names must NOT start with "_" (validated at runtime)
 // - This separation allows iteration over outputs via Object.keys filtering
 //
-// All buffer-like bindings (Buffer, RawBuffer, Handle) get handles on the Node,
-// not just declared kernel outputs. This enables in-place buffer re-use without
+// All buffer-like bindings (Buffer, RawBuffer, Handle) get handles on the Node.
+// This enables in-place buffer re-use without
 // declaring outputs:
 //
 //   const A = v.pass(K, { inout: buf });
@@ -122,7 +118,7 @@ export interface NodeBase {
  * Represents a compute pass with its dependencies and output handles.
  * 
  * Handles are spread directly onto the node for ALL buffer-like bindings
- * (Buffer, RawBuffer, Handle), not just declared kernel outputs.
+ * (Buffer, RawBuffer, Handle)
  * 
  * @example
  * ```ts
