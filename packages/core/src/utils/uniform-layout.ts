@@ -1,4 +1,5 @@
 import type { LayoutRules } from './layout.js';
+import { supportsWgslLanguageFeature } from './wgsl-features.js';
 
 export type UniformLayoutPreference = 'auto' | 'classic' | 'standard';
 export type UniformLayoutMode = 'classic' | 'standard';
@@ -11,26 +12,9 @@ export const UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION =
  * storage-like layout rules in the uniform address space.
  */
 export function supportsUniformBufferStandardLayout(): boolean {
-    const nav = (globalThis as { navigator?: unknown }).navigator as
-        | {
-              gpu?: {
-                  wgslLanguageFeatures?: {
-                      has?: (feature: string) => boolean;
-                  };
-              };
-          }
-        | undefined;
-
-    const hasFeature = nav?.gpu?.wgslLanguageFeatures?.has;
-    if (typeof hasFeature !== 'function') {
-        return false;
-    }
-
-    try {
-        return hasFeature(UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION);
-    } catch {
-        return false;
-    }
+    return supportsWgslLanguageFeature(
+        UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION
+    );
 }
 
 /**

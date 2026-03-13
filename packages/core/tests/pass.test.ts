@@ -33,6 +33,7 @@ import {
 } from '../src/graph/node.js';
 import { PipelineCache } from '../src/graph/pipeline-cache.js';
 import { VoltenContext } from '../src/context.js';
+import { supportsWgslLanguageFeature } from '../src/utils/wgsl-features.js';
 
 // =============================================================================
 // Helper: create buffers for testing (no GPU needed for classification)
@@ -855,6 +856,35 @@ describe('VoltenContext.pass()', () => {
         expect(() => new VoltenContext({} as GPUDevice, {
             uniformLayoutMode: 'standard',
         })).toThrow(/requires WGSL extension "uniform_buffer_standard_layout"/);
+    });
+
+    it('checks WGSL language features without detaching the has() method', () => {
+        const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+        Object.defineProperty(globalThis, 'navigator', {
+            configurable: true,
+            value: {
+                gpu: {
+                    wgslLanguageFeatures: {
+                        featureName: 'uniform_buffer_standard_layout',
+                        has(this: { featureName: string }, name: string) {
+                            return name === this.featureName;
+                        },
+                    },
+                },
+            },
+        });
+
+        try {
+            expect(
+                supportsWgslLanguageFeature('uniform_buffer_standard_layout')
+            ).toBe(true);
+        } finally {
+            if (originalNavigatorDescriptor) {
+                Object.defineProperty(globalThis, 'navigator', originalNavigatorDescriptor);
+            } else {
+                delete (globalThis as { navigator?: unknown }).navigator;
+            }
+        }
     });
 
     it('auto mode uses standard layout when extension is available', () => {
