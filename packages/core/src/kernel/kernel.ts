@@ -3,6 +3,8 @@
 
 import { processShaderSource } from './builtins.js';
 
+const BARRIER_USAGE_REGEX = /\b(?:workgroupBarrier|storageBarrier)\s*\(/;
+
 /** Output size specification for pool allocation */
 export type OutputSize = number | ((data: Record<string, unknown>) => number);
 
@@ -169,6 +171,9 @@ export class Kernel {
     /** Thread dispatch specification */
     readonly threads?: ThreadsSpec;
 
+    /** Whether the kernel source uses WGSL synchronization barriers. */
+    readonly usesBarrier: boolean;
+
     /** Skip Volten's hidden dispatch-bounds guard and manage bounds manually. */
     readonly unsafeManualBounds: boolean;
 
@@ -182,6 +187,7 @@ export class Kernel {
             options?.workgroupSize
         );
         this.threads = options?.threads;
+        this.usesBarrier = BARRIER_USAGE_REGEX.test(source);
         this.unsafeManualBounds = options?.unsafeManualBounds ?? false;
     }
 

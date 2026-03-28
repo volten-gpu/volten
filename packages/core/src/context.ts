@@ -66,11 +66,6 @@ import {
  */
 export type ReadTarget = Node | Buffer | RawBuffer | Handle;
 
-// these exist to prevent kernels with gid bound guards to run if they use
-// barriers, the rationale is that when using barriers, you ideally should
-// always use the unbounded option and let all workgroup lanes run
-const BOUNDS_GUARD_BARRIER_REGEX = /\b(?:workgroupBarrier|storageBarrier)\s*\(/;
-
 function dispatchNeedsBoundsGuard(
     bounds: [number, number, number],
     dispatch: [number, number, number],
@@ -81,10 +76,6 @@ function dispatchNeedsBoundsGuard(
         dispatch[1] * workgroupSize[1] !== bounds[1] ||
         dispatch[2] * workgroupSize[2] !== bounds[2]
     );
-}
-
-function kernelUsesBarrier(source: string): boolean {
-    return BOUNDS_GUARD_BARRIER_REGEX.test(source);
 }
 
 /**
@@ -173,7 +164,7 @@ export class VoltenContext {
 
         if (
             !kernel.unsafeManualBounds &&
-            kernelUsesBarrier(kernel.source) &&
+            kernel.usesBarrier &&
             dispatchNeedsBoundsGuard(bounds, dispatch, kernel.workgroupSize)
         ) {
             throw new Error(

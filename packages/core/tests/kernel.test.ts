@@ -355,6 +355,13 @@ describe('Kernel Class', () => {
             const kernel = new Kernel('fn main() { }');
             expect(kernel.unsafeManualBounds).toBe(false);
         });
+
+        it('tracks whether the source uses barriers', () => {
+            expect(
+                new Kernel('fn main() { workgroupBarrier(); }').usesBarrier
+            ).toBe(true);
+            expect(new Kernel('fn main() { }').usesBarrier).toBe(false);
+        });
     });
 
     describe('outputs normalization', () => {
