@@ -66,6 +66,9 @@ import {
  */
 export type ReadTarget = Node | Buffer | RawBuffer | Handle;
 
+// these exist to prevent kernels with gid bound guards to run if they use
+// barriers, the rationale is that when using barriers, you ideally should
+// always use the unbounded option and let all workgroup lanes run
 const BOUNDS_GUARD_BARRIER_REGEX = /\b(?:workgroupBarrier|storageBarrier)\s*\(/;
 
 function dispatchNeedsBoundsGuard(
