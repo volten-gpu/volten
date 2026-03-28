@@ -256,6 +256,8 @@ export class VoltenContext {
     private _resolveGPUBuffer(
         value: Buffer | RawBuffer | Uniform | Handle
     ): GPUBuffer {
+        // no need to Handle-check uniforms, it would make
+        // no sense to have an Handle to a uniform
         if (value instanceof Uniform) {
             return value.ensure(this.device);
         }
