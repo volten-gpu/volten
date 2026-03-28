@@ -180,7 +180,7 @@ fn main(gid: vec3u) {
         expect(uniformBufferCalls.length).toBeGreaterThan(0);
     });
 
-    it('v.read() reads back outputs and parses them into TypedArrays based on type', async () => {
+    it('v.read() reads back outputs and parses them into TypedArrays without dispatching compute', async () => {
         const input = new Buffer([1], 'f32');
         const outputFloat = new Buffer([0], 'f32');
         const outputUint = new Buffer([0], 'u32');
@@ -193,12 +193,21 @@ fn main(gid: vec3u) {
         });
         const node = v.pass(K, { input, outputFloat, outputUint });
 
+        v.run(node);
+
+        mockSubmit.mockClear();
+        mockBeginComputePass.mockClear();
+        mockPassDispatch.mockClear();
+        mockCopyBufferToBuffer.mockClear();
+        mockMapAsync.mockClear();
+        mockGetMappedRange.mockClear();
+
         const result = await v.read(node);
 
-        expect(mockSubmit).toHaveBeenCalled(); // Compute + Copy (might be 1 or 2 submits depending on implementation)
-        // Check copy
+        expect(mockBeginComputePass).not.toHaveBeenCalled();
+        expect(mockPassDispatch).not.toHaveBeenCalled();
+        expect(mockSubmit).toHaveBeenCalledTimes(1);
         expect(mockCopyBufferToBuffer).toHaveBeenCalled();
-        // Check map
         expect(mockMapAsync).toHaveBeenCalled();
         expect(mockGetMappedRange).toHaveBeenCalled();
 
