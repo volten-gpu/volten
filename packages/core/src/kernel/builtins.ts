@@ -300,20 +300,6 @@ function finalizeComputeEntryPoint(
 }
 
 /**
- * Inject @compute and @workgroup_size decorators before the main function.
- *
- * @param source - The WGSL shader source
- * @param workgroupSize - The workgroup size as [x, y, z]
- * @returns The source with compute decorators injected
- */
-export function injectComputeDecorators(
-    source: string,
-    workgroupSize: [number, number, number] = [64, 1, 1]
-): string {
-    return finalizeComputeEntryPoint(source, workgroupSize);
-}
-
-/**
  * Process shader source: expand shorthands and inject decorators.
  * This is the main entry point for shader source transformation.
  *

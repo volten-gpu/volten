@@ -9,7 +9,6 @@ import {
     expandParameter,
     expandParameterList,
     expandBuiltinShorthands,
-    injectComputeDecorators,
     processShaderSource
 } from '../src/kernel/index.js';
 
@@ -255,28 +254,30 @@ fn main(gid: vec3<u32>) { }
 // =============================================================================
 
 describe('Compute Decorator Injection', () => {
-    describe('injectComputeDecorators()', () => {
-        it('injects @compute and @workgroup_size', () => {
+    describe('processShaderSource()', () => {
+        it('injects @compute and @workgroup_size in unguarded mode', () => {
             const source = `fn main(gid: vec3<u32>) { }`;
-            const result = injectComputeDecorators(source, [64, 1, 1]);
+            const result = processShaderSource(source, [64, 1, 1], {
+                unsafeManualBounds: true
+            });
             expect(result).toBe(`@compute @workgroup_size(64, 1, 1)
-fn main(gid: vec3<u32>) { }`);
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) { }`);
         });
 
-        it('uses default workgroup size', () => {
+        it('uses the default workgroup size', () => {
             const source = `fn main(gid: vec3<u32>) { }`;
-            const result = injectComputeDecorators(source);
+            const result = processShaderSource(source);
             expect(result).toContain('@workgroup_size(64, 1, 1)');
         });
 
-        it('supports custom workgroup size', () => {
+        it('supports custom workgroup size in unguarded mode', () => {
             const source = `fn main() { }`;
-            const result = injectComputeDecorators(source, [256, 4, 2]);
+            const result = processShaderSource(source, [256, 4, 2], {
+                unsafeManualBounds: true
+            });
             expect(result).toContain('@workgroup_size(256, 4, 2)');
         });
-    });
 
-    describe('processShaderSource()', () => {
         it('combines expansion and injection', () => {
             const source = `fn main(gid: vec3<u32>) {
     output[gid.x] = input[gid.x] * 2.0;
