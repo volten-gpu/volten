@@ -15,16 +15,15 @@ const GPUBufferUsage = {
     UNIFORM: 0x0040,
     STORAGE: 0x0080,
     INDIRECT: 0x0100,
-    QUERY_RESOLVE: 0x0200,
+    QUERY_RESOLVE: 0x0200
 };
 (global as any).GPUBufferUsage = GPUBufferUsage;
 
 const GPUMapMode = {
     READ: 0x0001,
-    WRITE: 0x0002,
+    WRITE: 0x0002
 };
 (global as any).GPUMapMode = GPUMapMode;
-
 
 // Mocks
 const mockSubmit = vi.fn();
@@ -49,15 +48,15 @@ const mockDevice = {
     queue: {
         submit: mockSubmit,
         onSubmittedWorkDone: mockOnSubmittedWorkDone,
-        writeBuffer: mockWriteBuffer,
+        writeBuffer: mockWriteBuffer
     },
     createBuffer: mockCreateBuffer,
     createBindGroup: mockCreateBindGroup,
     createCommandEncoder: mockCreateCommandEncoder,
     createShaderModule: vi.fn(),
     createComputePipeline: vi.fn().mockReturnValue({
-        getBindGroupLayout: vi.fn(),
-    }),
+        getBindGroupLayout: vi.fn()
+    })
 } as any as GPUDevice;
 
 describe('VoltenContext Execution', () => {
@@ -71,21 +70,26 @@ describe('VoltenContext Execution', () => {
         mockCreateCommandEncoder.mockReturnValue({
             beginComputePass: mockBeginComputePass,
             finish: mockEncoderFinish,
-            copyBufferToBuffer: mockCopyBufferToBuffer,
+            copyBufferToBuffer: mockCopyBufferToBuffer
         });
         mockBeginComputePass.mockReturnValue({
             setPipeline: mockPassSetPipeline,
             setBindGroup: mockPassSetBindGroup,
             dispatchWorkgroups: mockPassDispatch,
-            end: mockPassEnd,
+            end: mockPassEnd
         });
-        mockCreateBuffer.mockReturnValue({
+        mockCreateBuffer.mockImplementation((desc: any) => ({
             mapAsync: mockMapAsync,
-            getMappedRange: mockGetMappedRange,
+            getMappedRange:
+                (desc.usage & GPUBufferUsage.MAP_READ) !== 0
+                    ? mockGetMappedRange
+                    : vi.fn(() => new ArrayBuffer(Number(desc.size ?? 16))),
             unmap: mockUnmap,
-            destroy: mockDestroy,
-        });
-        mockGetMappedRange.mockReturnValue(new Float32Array([10, 20, 30]).buffer);
+            destroy: mockDestroy
+        }));
+        mockGetMappedRange.mockReturnValue(
+            new Float32Array([10, 20, 30]).buffer
+        );
     });
 
     it('v.run() executes a linear chain in order', () => {
@@ -94,8 +98,14 @@ describe('VoltenContext Execution', () => {
         const mid = new Buffer([0], 'f32');
         const output = new Buffer([0], 'f32');
 
-        const K1 = new Kernel('fn main() {}', { outputs: { mid: { definedBy: 'input' } }, threads: 'input' });
-        const K2 = new Kernel('fn main() {}', { outputs: { output: { definedBy: 'data' } }, threads: 'data' });
+        const K1 = new Kernel('fn main() {}', {
+            outputs: { mid: { definedBy: 'input' } },
+            threads: 'input'
+        });
+        const K2 = new Kernel('fn main() {}', {
+            outputs: { output: { definedBy: 'data' } },
+            threads: 'data'
+        });
 
         const A = v.pass(K1, { input, mid });
         const B = v.pass(K2, { data: A.mid, output });
@@ -111,7 +121,10 @@ describe('VoltenContext Execution', () => {
     it('v.wait() waits on work done', async () => {
         const input = new Buffer([1], 'f32');
         const output = new Buffer([0], 'f32');
-        const K = new Kernel('fn main() {}', { outputs: { output: { definedBy: 'input' } }, threads: 'input' });
+        const K = new Kernel('fn main() {}', {
+            outputs: { output: { definedBy: 'input' } },
+            threads: 'input'
+        });
         const node = v.pass(K, { input, output });
 
         await v.wait(node);
@@ -125,21 +138,46 @@ describe('VoltenContext Execution', () => {
         const output = new Buffer([0, 0, 0], 'f32');
         const multiplier = new Uniform(2.0, 'f32');
 
-        const K = new Kernel(`
+        const K = new Kernel(
+            `
 fn main(gid: vec3u) {
     output[gid.x] = input[gid.x] * multiplier;
 }
-`, { threads: 'input' });
+`,
+            { threads: 'input' }
+        );
 
         const node = v.pass(K, { input, output, multiplier });
         v.run(node);
 
-        const uniformBufferCall = mockCreateBuffer.mock.calls.find(call => {
+        const uniformBufferCall = mockCreateBuffer.mock.calls.find((call) => {
             const desc = call[0];
             return (desc.usage & GPUBufferUsage.UNIFORM) !== 0;
         });
 
         expect(uniformBufferCall).toBeDefined();
+    });
+
+    it('v.run() creates a hidden bounds uniform buffer for guarded kernels', () => {
+        const input = new Buffer([1, 2, 3], 'f32');
+        const K = new Kernel(
+            'fn main(gid: vec3u) { data[gid.x] = data[gid.x]; }',
+            {
+                threads: 3
+            }
+        );
+
+        const node = v.pass(K, { data: input });
+        v.run(node);
+
+        const uniformBufferCalls = mockCreateBuffer.mock.calls.filter(
+            (call) => {
+                const desc = call[0];
+                return (desc.usage & GPUBufferUsage.UNIFORM) !== 0;
+            }
+        );
+
+        expect(uniformBufferCalls.length).toBeGreaterThan(0);
     });
 
     it('v.read() reads back outputs and parses them into TypedArrays based on type', async () => {
@@ -240,4 +278,3 @@ fn main(gid: vec3u) {
         expect(mockWriteBuffer).toHaveBeenCalledTimes(1);
     });
 });
-

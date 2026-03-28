@@ -9,12 +9,12 @@ import { type Handle, isHandle } from '../graph/node.js';
 import type { TypeDescriptor } from '../types/schema.js';
 import {
     generateTypeDeclarations,
-    type BindingTypeInfo,
+    type BindingTypeInfo
 } from './type-declarations.js';
 import type { Kernel } from './kernel.js';
 import {
     type UniformLayoutMode,
-    UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION,
+    UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION
 } from '../utils/uniform-layout.js';
 
 /**
@@ -60,15 +60,11 @@ function isUniform(value: unknown): value is Uniform {
     return value instanceof Uniform;
 }
 
-
-
 /**
  * Resolve the wgslType and wgslAccess from a Handle by walking up the Handle chain.
  * Recursively follows Handle → source node's binding until a concrete Buffer/RawBuffer is found.
  */
-function resolveHandleSource(
-    handle: Handle
-): {
+function resolveHandleSource(handle: Handle): {
     wgslType: string;
     wgslAddressSpace: 'storage' | 'uniform';
     wgslAccess?: string;
@@ -80,21 +76,21 @@ function resolveHandleSource(
             wgslType: source.wgslType,
             wgslAddressSpace: 'storage',
             wgslAccess: source.wgslAccess,
-            typeDescriptor: source.type,
+            typeDescriptor: source.type
         };
     }
     if (isRawBuffer(source)) {
         return {
             wgslType: source.wgslType,
             wgslAddressSpace: 'storage',
-            wgslAccess: source.wgslAccess,
+            wgslAccess: source.wgslAccess
         };
     }
     if (isUniform(source)) {
         return {
             wgslType: source.wgslType,
             wgslAddressSpace: 'uniform',
-            typeDescriptor: source.type,
+            typeDescriptor: source.type
         };
     }
     if (isHandle(source)) {
@@ -107,13 +103,13 @@ function resolveHandleSource(
 
 /**
  * Generate binding entries from user-provided bindings and kernel definition.
- * 
+ *
  * Classification rules:
  * - Buffer → var<storage, read|read_write> based on buffer.access
  * - RawBuffer → var<storage, read|read_write> based on buffer.access
  * - Handle → resolved from source node's binding (walks up the Handle chain)
  * - Anything else → throws an error
- * 
+ *
  * @param bindings - User-provided bindings record
  * @param kernel - The kernel definition
  * @returns Array of classified binding entries
@@ -137,7 +133,7 @@ export function generateBindings(
                 wgslAccess: value.wgslAccess,
                 source: value,
                 isHandle: false,
-                typeDescriptor: value.type,
+                typeDescriptor: value.type
             });
         } else if (isRawBuffer(value)) {
             entries.push({
@@ -147,7 +143,7 @@ export function generateBindings(
                 wgslAddressSpace: 'storage',
                 wgslAccess: value.wgslAccess,
                 source: value,
-                isHandle: false,
+                isHandle: false
             });
         } else if (isUniform(value)) {
             value.setLayoutMode(uniformLayoutMode);
@@ -158,7 +154,7 @@ export function generateBindings(
                 wgslAddressSpace: 'uniform',
                 source: value,
                 isHandle: false,
-                typeDescriptor: value.type,
+                typeDescriptor: value.type
             });
         } else if (isHandle(value)) {
             // Resolve actual type by walking up the Handle chain
@@ -171,18 +167,18 @@ export function generateBindings(
                 wgslAccess: resolved.wgslAccess,
                 source: value,
                 isHandle: true,
-                typeDescriptor: resolved.typeDescriptor,
+                typeDescriptor: resolved.typeDescriptor
             });
         } else if (typeof value === 'number') {
             throw new Error(
                 `Volten Error: Binding "${name}" is a number (${value}). ` +
-                `Raw scalar bindings are not supported in v0.\n` +
-                `  Hint: Wrap it in a Buffer: new Buffer([${value}], "f32")`
+                    `Raw scalar bindings are not supported in v0.\n` +
+                    `  Hint: Wrap it in a Buffer: new Buffer([${value}], "f32")`
             );
         } else {
             throw new Error(
                 `Volten Error: Binding "${name}" has unsupported type: ${typeof value}.\n` +
-                `  Expected: Buffer, RawBuffer, Uniform, or Handle (output from a previous v.pass()).`
+                    `  Expected: Buffer, RawBuffer, Uniform, or Handle (output from a previous v.pass()).`
             );
         }
     }
@@ -192,11 +188,11 @@ export function generateBindings(
 
 /**
  * Generate WGSL binding declarations from binding entries.
- * 
+ *
  * @example
  * // Input entry: { index: 0, name: "input", wgslType: "array<f32>", wgslAccess: "read" }
  * // Output: "@group(0) @binding(0) var<storage, read> input: array<f32>;"
- * 
+ *
  * @param entries - Classified binding entries
  * @returns WGSL source string with binding declarations
  */
@@ -204,7 +200,7 @@ export function generateBindingWgsl(entries: BindingEntry[]): string {
     if (entries.length === 0) return '';
 
     return entries
-        .map(entry => {
+        .map((entry) => {
             if (entry.wgslAddressSpace === 'uniform') {
                 return `@group(0) @binding(${entry.index}) var<uniform> ${entry.name}: ${entry.wgslType};`;
             }
@@ -215,10 +211,10 @@ export function generateBindingWgsl(entries: BindingEntry[]): string {
 
 /**
  * Assemble the full shader source: binding declarations + kernel source.
- * 
+ *
  * The binding WGSL is prepended to the kernel's assembled source (which already
  * has builtin shorthands expanded and @compute/@workgroup_size injected).
- * 
+ *
  * @param kernel - The kernel definition
  * @param entries - Classified binding entries
  * @returns Complete WGSL shader source ready for pipeline creation
@@ -229,16 +225,19 @@ export function assembleFullShader(
     options?: { uniformLayoutMode?: UniformLayoutMode }
 ): string {
     const uniformLayoutMode = options?.uniformLayoutMode ?? 'classic';
-    const bindingTypeInfo: BindingTypeInfo[] = entries.map(entry => ({
+    const bindingTypeInfo: BindingTypeInfo[] = entries.map((entry) => ({
         name: entry.name,
         wgslAddressSpace: entry.wgslAddressSpace,
-        typeDescriptor: entry.typeDescriptor,
+        typeDescriptor: entry.typeDescriptor
     }));
-    const typeDeclarations = generateTypeDeclarations(bindingTypeInfo, uniformLayoutMode);
+    const typeDeclarations = generateTypeDeclarations(
+        bindingTypeInfo,
+        uniformLayoutMode
+    );
     const bindingWgsl = generateBindingWgsl(entries);
     const requiresUniformStandardLayout =
         uniformLayoutMode === 'standard' &&
-        entries.some(entry => entry.wgslAddressSpace === 'uniform');
+        entries.some((entry) => entry.wgslAddressSpace === 'uniform');
     const kernelSource = kernel.assembledSource;
 
     if (!bindingWgsl && !typeDeclarations && !requiresUniformStandardLayout) {
@@ -261,101 +260,100 @@ export function assembleFullShader(
 
 /**
  * Resolve thread dispatch dimensions from kernel config and bindings.
- * 
+ *
  * Resolution order:
  * 1. Pass-time override (options.threads)
  * 2. Kernel-level threads spec
  * 3. Auto-inference from single buffer binding
- * 
+ *
  * @param kernel - The kernel definition
  * @param bindings - User-provided bindings record
  * @param passThreads - Optional pass-time thread override
  * @returns Dispatch dimensions as [x, y, z]
  */
-export function resolveDispatch(
+export function resolveBounds(
     kernel: Kernel,
     bindings: Record<string, unknown>,
     passThreads?: number | [number, number] | [number, number, number]
 ): [number, number, number] {
-    const workgroupSize = kernel.workgroupSize;
-
-    // 1. Pass-time override
     if (passThreads !== undefined) {
         if (typeof passThreads === 'number') {
-            return threadsToDispatch(passThreads, workgroupSize);
+            return [passThreads, 1, 1];
         }
-        // Array of total invocations per dimension → normalize to 3D and divide
-        return threadsToDispatch3D(normalizeThreads(passThreads), workgroupSize);
+        return normalizeThreads(passThreads);
     }
 
-    // 2. Kernel-level threads spec
     const threads = kernel.threads;
     if (threads !== undefined) {
         if (typeof threads === 'number') {
-            return threadsToDispatch(threads, workgroupSize);
+            return [threads, 1, 1];
         }
         if (typeof threads === 'string') {
-            // Infer from named input
             const binding = bindings[threads];
             if (!binding) {
                 throw new Error(
                     `Volten Error: Kernel threads spec references input "${threads}", ` +
-                    `but it was not found in bindings.\n` +
-                    `  Available bindings: ${Object.keys(bindings).join(', ')}`
+                        `but it was not found in bindings.\n` +
+                        `  Available bindings: ${Object.keys(bindings).join(', ')}`
                 );
             }
             const count = getBindingCount(binding, threads);
-            return threadsToDispatch(count, workgroupSize);
+            return [count, 1, 1];
         }
         if (typeof threads === 'function') {
             const result = threads(bindings);
-            // Function can return number, [n,n], or [n,n,n]
             if (typeof result === 'number') {
-                return threadsToDispatch(result, workgroupSize);
+                return [result, 1, 1];
             }
-            return threadsToDispatch3D(normalizeThreads(result), workgroupSize);
+            return normalizeThreads(result);
         }
     }
 
-    // 3. Auto-inference: find the first (and ideally only) buffer binding
-    const bufferBindings = Object.entries(bindings).filter(
-        ([, v]) => {
-            // also walks the Handle chain if necessary
-            if (resolveConcreteBuffer(v)) {
-                return true;
-            }
-            return false;
+    const bufferBindings = Object.entries(bindings).filter(([, v]) => {
+        if (resolveConcreteBuffer(v)) {
+            return true;
         }
-    );
+        return false;
+    });
 
     if (bufferBindings.length === 0) {
         throw new Error(
             'Volten Error: Cannot auto-infer thread count — no buffer bindings found.\n' +
-            '  Hint: Specify threads explicitly: new Kernel(`...`, { threads: 1024 })'
+                '  Hint: Specify threads explicitly: new Kernel(`...`, { threads: 1024 })'
         );
     }
 
     if (bufferBindings.length === 1) {
         const [name, buf] = bufferBindings[0];
         const count = getBindingCount(buf, name);
-        return threadsToDispatch(count, workgroupSize);
+        return [count, 1, 1];
     }
 
-    // Multiple buffers — look for a kernel output to exclude, use remaining inputs
     const outputNames = new Set(kernel.outputNames);
-    const inputBuffers = bufferBindings.filter(([name]) => !outputNames.has(name));
+    const inputBuffers = bufferBindings.filter(
+        ([name]) => !outputNames.has(name)
+    );
 
     if (inputBuffers.length === 1) {
         const [name, buf] = inputBuffers[0];
         const count = getBindingCount(buf, name);
-        return threadsToDispatch(count, workgroupSize);
+        return [count, 1, 1];
     }
 
     throw new Error(
         `Volten Error: Cannot auto-infer thread count — ${inputBuffers.length} input buffers found.\n` +
-        `  Bindings: ${inputBuffers.map(([n]) => n).join(', ')}\n` +
-        `  Hint: Specify threads explicitly: new Kernel(\`...\`, { threads: '${inputBuffers[0]?.[0] ?? 'input'}' })`
+            `  Bindings: ${inputBuffers.map(([n]) => n).join(', ')}\n` +
+            `  Hint: Specify threads explicitly: new Kernel(\`...\`, { threads: '${inputBuffers[0]?.[0] ?? 'input'}' })`
     );
+}
+
+export function resolveDispatch(
+    kernel: Kernel,
+    bindings: Record<string, unknown>,
+    passThreads?: number | [number, number] | [number, number, number]
+): [number, number, number] {
+    const bounds = resolveBounds(kernel, bindings, passThreads);
+    return threadsToDispatch3D(bounds, kernel.workgroupSize);
 }
 
 /**
@@ -370,18 +368,20 @@ function getBindingCount(value: unknown, name: string): number {
         // RawBuffer doesn't have a count; use byte length as fallback
         throw new Error(
             `Volten Error: Cannot infer thread count from RawBuffer "${name}" — ` +
-            `RawBuffer doesn't track element count.\n` +
-            `  Hint: Specify threads explicitly in the Kernel options.`
+                `RawBuffer doesn't track element count.\n` +
+                `  Hint: Specify threads explicitly in the Kernel options.`
         );
     }
     if (isHandle(value)) {
         // Walk up the Handle chain to find the backing Buffer's count
-        const source = (value as Handle)._node._bindings[(value as Handle)._name];
+        const source = (value as Handle)._node._bindings[
+            (value as Handle)._name
+        ];
         return getBindingCount(source, name);
     }
     throw new Error(
         `Volten Error: Cannot infer thread count from binding "${name}" — ` +
-        `it is not a Buffer.`
+            `it is not a Buffer.`
     );
 }
 
@@ -410,7 +410,7 @@ function threadsToDispatch3D(
     return [
         Math.ceil(threads[0] / workgroupSize[0]),
         Math.ceil(threads[1] / workgroupSize[1]),
-        Math.ceil(threads[2] / workgroupSize[2]),
+        Math.ceil(threads[2] / workgroupSize[2])
     ];
 }
 

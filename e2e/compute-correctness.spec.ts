@@ -11,7 +11,11 @@ const BASE_URL = 'http://localhost:5174';
 test.describe('Arithmetic compute operations', () => {
     test.beforeEach(async ({ page }) => {
         await page.goto(BASE_URL);
-        await page.waitForFunction(() => (window as any).__gpuReady === true, null, { timeout: 10_000 });
+        await page.waitForFunction(
+            () => (window as any).__gpuReady === true,
+            null,
+            { timeout: 10_000 }
+        );
     });
 
     test('multiply each element by 2', async ({ page }) => {
@@ -61,14 +65,17 @@ test.describe('Arithmetic compute operations', () => {
 
             const input = new Buffer([5, 10, 15, 20], 'f32');
             const output = new Buffer([0, 0, 0, 0], 'f32', 'rw');
-            const k = new Kernel(`
+            const k = new Kernel(
+                `
               fn main(gid: vec3u) {
                 output[gid.x] = input[gid.x] * 3.0;
               }
-            `, {
-                outputs: { output: { definedBy: 'input' } },
-                threads: 'input',
-            });
+            `,
+                {
+                    outputs: { output: { definedBy: 'input' } },
+                    threads: 'input'
+                }
+            );
             const node = v.pass(k, { input, output });
             v.run(node);
             const res = await v.read(node);
@@ -123,10 +130,16 @@ test.describe('Arithmetic compute operations', () => {
 test.describe('Thread dispatch inference', () => {
     test.beforeEach(async ({ page }) => {
         await page.goto(BASE_URL);
-        await page.waitForFunction(() => (window as any).__gpuReady === true, null, { timeout: 10_000 });
+        await page.waitForFunction(
+            () => (window as any).__gpuReady === true,
+            null,
+            { timeout: 10_000 }
+        );
     });
 
-    test('threads inferred from buffer size processes all elements', async ({ page }) => {
+    test('threads inferred from buffer size processes all elements', async ({
+        page
+    }) => {
         const result = await page.evaluate(async () => {
             const { volten, Buffer, Kernel } = (window as any).Volten;
             const v = await volten();
@@ -146,7 +159,7 @@ test.describe('Thread dispatch inference', () => {
             return {
                 length: arr.length,
                 first5: arr.slice(0, 5),
-                last5: arr.slice(-5),
+                last5: arr.slice(-5)
             };
         });
 
@@ -161,12 +174,19 @@ test.describe('Thread dispatch inference', () => {
             const v = await volten();
 
             // Buffer has 8 elements, but we only process the first 4
-            const buf = new Buffer([1, 2, 3, 4, 100, 100, 100, 100], 'f32', 'rw');
-            const k = new Kernel(`
+            const buf = new Buffer(
+                [1, 2, 3, 4, 100, 100, 100, 100],
+                'f32',
+                'rw'
+            );
+            const k = new Kernel(
+                `
               fn main(gid: vec3u) {
                 inout[gid.x] = inout[gid.x] * 10.0;
               }
-            `, { threads: 4 });
+            `,
+                { threads: 4 }
+            );
             const node = v.pass(k, { inout: buf });
             v.run(node);
             const output = await v.read(node);
@@ -174,6 +194,36 @@ test.describe('Thread dispatch inference', () => {
         });
 
         // First 4 multiplied, last 4 untouched
+        expect(result.slice(0, 4)).toEqual([10, 20, 30, 40]);
+        expect(result.slice(4)).toEqual([100, 100, 100, 100]);
+    });
+
+    test('guarded kernels work even when user main does not declare gid', async ({
+        page
+    }) => {
+        const result = await page.evaluate(async () => {
+            const { volten, Buffer, Kernel } = (window as any).Volten;
+            const v = await volten();
+
+            const buf = new Buffer(
+                [1, 2, 3, 4, 100, 100, 100, 100],
+                'f32',
+                'rw'
+            );
+            const k = new Kernel(
+                `
+              fn main(lid: u32) {
+                inout[lid] = inout[lid] * 10.0;
+              }
+            `,
+                { threads: 4 }
+            );
+            const node = v.pass(k, { inout: buf });
+            v.run(node);
+            const output = await v.read(node);
+            return Array.from(output.inout);
+        });
+
         expect(result.slice(0, 4)).toEqual([10, 20, 30, 40]);
         expect(result.slice(4)).toEqual([100, 100, 100, 100]);
     });

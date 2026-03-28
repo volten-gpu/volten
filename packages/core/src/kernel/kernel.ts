@@ -21,7 +21,7 @@ export interface OutputConfig {
      */
     type?: string;
 
-    /** 
+    /**
      * Output size specification (element count).
      * Takes precedence over definedBy for size.
      * - number: Fixed size
@@ -51,20 +51,22 @@ export type OutputsSpec = Record<string, OutputConfig>;
  * threads: (data) => data.input.count     // → dynamic 1D
  */
 export type ThreadsSpec =
-    | number                                                    // Simple 1D count
-    | string                                                    // Infer from named input
-    | ((data: Record<string, unknown>) => number | [number, number] | [number, number, number]); // Dynamic
+    | number // Simple 1D count
+    | string // Infer from named input
+    | ((
+          data: Record<string, unknown>
+      ) => number | [number, number] | [number, number, number]); // Dynamic
 
 /**
  * Options for Kernel creation
  */
 export interface KernelOptions {
-    /** 
+    /**
      * Output declarations for pool-allocation preparation.
-     * 
+     *
      * Record<string, OutputConfig>: declarative output description with
      * definedBy / type / size fields.
-     * 
+     *
      * @example
      * ```ts
      * outputs: {
@@ -76,15 +78,15 @@ export interface KernelOptions {
      */
     outputs?: OutputsSpec;
 
-    /** 
+    /**
      * Workgroup size for the compute shader.
      * Defaults to [64, 1, 1].
      * ^ This default is not optimal for kernels that work in 2D spaces and
      *   require frequent neighbor lookups like blur / stencil ops, I decided
      *   however to keep this as an initial default and handle the optimal
-     *   workgroup size at the stdlib level, e.g. the author of a gaussianBlur 
+     *   workgroup size at the stdlib level, e.g. the author of a gaussianBlur
      *   kernel should use the correct workgroup size for that type of kernel.
-     *   Workgroup size is a compile-time, algorithmic concern. 
+     *   Workgroup size is a compile-time, algorithmic concern.
      *   Dispatch dimensions are a runtime, data-shape concern
      * The shader will have @workgroup_size(x, y, z) injected.
      */
@@ -96,10 +98,19 @@ export interface KernelOptions {
      * - number: Fixed 1D dispatch count
      * - string: Infer from the length of the named input buffer
      * - function: Compute dynamically from pass-time inputs
-     * 
+     *
      * If omitted, Volten will attempt to infer from a single input.
      */
     threads?: ThreadsSpec;
+
+    /**
+     * Opt out of Volten's hidden dispatch-bounds guard.
+     *
+     * Use this for advanced kernels that manage bounds manually, or for
+     * workgroup-cooperative kernels where an injected early return would be
+     * inappropriate.
+     */
+    unsafeManualBounds?: boolean;
 }
 
 /**
@@ -114,13 +125,14 @@ export interface NormalizedOutput {
 
 /**
  * Kernel class for compute shader definitions.
- * 
+ *
  * Handles:
  * - Builtin shorthand expansion (gid, lid, wid, lid3, nwg)
+ * - Guarded entry-point generation by default
  * - @compute and @workgroup_size injection
  * - Output declarations with optional size specifications
  * - Thread dispatch configuration
- * 
+ *
  * @example
  * ```ts
  * // Simple kernel — no outputs needed for in-place work
@@ -129,12 +141,12 @@ export interface NormalizedOutput {
  *     data[gid.x] *= 2.0;
  *   }
  * `);
- * 
+ *
  * // Kernel with declarative outputs (for pool allocation)
  * const BlurKernel = new Kernel(`...`, {
  *   outputs: { output: { definedBy: 'input' } },
  * });
- * 
+ *
  * // Kernel with explicit output size (e.g., reduce)
  * const ReduceKernel = new Kernel(`...`, {
  *   outputs: { result: { type: 'array<f32>', size: 1 } },
@@ -146,7 +158,7 @@ export class Kernel {
     /** The original user-provided WGSL source */
     readonly source: string;
 
-    /** 
+    /**
      * Normalized output declarations, object form { name, definedBy?, type?, size? }
      */
     readonly outputs: NormalizedOutput[];
@@ -157,24 +169,27 @@ export class Kernel {
     /** Thread dispatch specification */
     readonly threads?: ThreadsSpec;
 
+    /** Skip Volten's hidden dispatch-bounds guard and manage bounds manually. */
+    readonly unsafeManualBounds: boolean;
+
     /** Cached assembled source (with injections) */
     private _assembledSource: string | null = null;
 
-    constructor(
-        source: string,
-        options?: KernelOptions
-    ) {
+    constructor(source: string, options?: KernelOptions) {
         this.source = source;
         this.outputs = this.normalizeOutputs(options?.outputs);
-        this.workgroupSize = this.normalizeWorkgroupSize(options?.workgroupSize);
+        this.workgroupSize = this.normalizeWorkgroupSize(
+            options?.workgroupSize
+        );
         this.threads = options?.threads;
+        this.unsafeManualBounds = options?.unsafeManualBounds ?? false;
     }
 
     /**
      * Get the assembled WGSL source with all transformations applied:
      * - Builtin shorthand expansion
      * - @compute and @workgroup_size injection
-     * 
+     *
      * Note: Binding injections (group/binding) are deferred to the DAG compiler
      * at v.pass() time when actual buffers are known.
      */
@@ -182,7 +197,8 @@ export class Kernel {
         if (this._assembledSource === null) {
             this._assembledSource = processShaderSource(
                 this.source,
-                this.workgroupSize
+                this.workgroupSize,
+                { unsafeManualBounds: this.unsafeManualBounds }
             );
         }
         return this._assembledSource;
@@ -192,7 +208,7 @@ export class Kernel {
      * Get output names as a simple array
      */
     get outputNames(): string[] {
-        return this.outputs.map(o => o.name);
+        return this.outputs.map((o) => o.name);
     }
 
     /**
@@ -205,7 +221,7 @@ export class Kernel {
             name,
             definedBy: config.definedBy,
             type: config.type,
-            size: config.size,
+            size: config.size
         }));
     }
 

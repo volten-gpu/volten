@@ -1,6 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { compile, resolveConcreteBuffer, type ExecutionPlan } from '../src/graph/compiler.js';
-import { createNode, isHandle, type Node, type Handle } from '../src/graph/node.js';
+import {
+    compile,
+    resolveConcreteBuffer,
+    type ExecutionPlan
+} from '../src/graph/compiler.js';
+import {
+    createNode,
+    isHandle,
+    type Node,
+    type Handle
+} from '../src/graph/node.js';
 import { Buffer } from '../src/data/buffer.js';
 import { RawBuffer } from '../src/data/raw-buffer.js';
 
@@ -17,17 +26,18 @@ import { RawBuffer } from '../src/data/raw-buffer.js';
 function makeNode(
     idStr: string,
     bindings: Record<string, Buffer | RawBuffer | Handle> = {},
-    dependencies: Node[] = [],
+    dependencies: Node[] = []
 ): Node {
     return createNode({
         kernel: { _source: '', _options: {} } as any,
         pipeline: {} as any,
         bindGroupLayout: {} as any,
         bindingEntries: [],
+        bounds: [1, 1, 1],
         dispatch: [1, 1, 1],
         bindings,
         shaderCode: '',
-        dependencies,
+        dependencies
     });
 }
 
@@ -35,8 +45,8 @@ function makeNode(
  * Assert that nodeA appears before nodeB in the sorted plan.
  */
 function assertBefore(plan: ExecutionPlan, nodeA: Node, nodeB: Node): void {
-    const idxA = plan.sorted.findIndex(n => n._id === nodeA._id);
-    const idxB = plan.sorted.findIndex(n => n._id === nodeB._id);
+    const idxA = plan.sorted.findIndex((n) => n._id === nodeA._id);
+    const idxB = plan.sorted.findIndex((n) => n._id === nodeB._id);
     expect(idxA).toBeGreaterThanOrEqual(0);
     expect(idxB).toBeGreaterThanOrEqual(0);
     expect(idxA).toBeLessThan(idxB);
@@ -53,7 +63,10 @@ describe('resolveConcreteBuffer', () => {
     });
 
     it('returns a RawBuffer directly', () => {
-        const raw = new RawBuffer(new Float32Array([1, 2]).buffer, 'array<f32>');
+        const raw = new RawBuffer(
+            new Float32Array([1, 2]).buffer,
+            'array<f32>'
+        );
         expect(resolveConcreteBuffer(raw)).toBe(raw);
     });
 
@@ -127,8 +140,8 @@ describe('compile — independent terminals', () => {
 
         // Both nodes present, either order is valid
         expect(plan.sorted).toHaveLength(2);
-        expect(plan.sorted.map(n => n._id)).toContain(A._id);
-        expect(plan.sorted.map(n => n._id)).toContain(B._id);
+        expect(plan.sorted.map((n) => n._id)).toContain(A._id);
+        expect(plan.sorted.map((n) => n._id)).toContain(B._id);
     });
 
     it('merges two independent chains without synthetic deps', () => {
@@ -228,7 +241,7 @@ describe('compile — synthetic dependency injection', () => {
         assertBefore(plan, E, G);
         // F has no ordering constraint with E or G (different buffer)
         // Just check all three are present
-        expect(plan.sorted.map(n => n._id)).toContain(F._id);
+        expect(plan.sorted.map((n) => n._id)).toContain(F._id);
     });
 });
 
@@ -285,7 +298,7 @@ describe('compile — overlapping subtrees', () => {
         expect(plan.sorted).toHaveLength(5);
 
         // Each node ID appears exactly once
-        const ids = plan.sorted.map(n => n._id);
+        const ids = plan.sorted.map((n) => n._id);
         expect(new Set(ids).size).toBe(5);
     });
 });

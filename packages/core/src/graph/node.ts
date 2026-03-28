@@ -38,8 +38,12 @@ export function isHandle(value: unknown): value is Handle {
  * Check if a value is a buffer-like binding (Buffer, RawBuffer, or Handle).
  * These are the binding types that should generate handles on a Node.
  */
-export function isBufferLike(value: unknown): value is Buffer | RawBuffer | Handle {
-    return value instanceof Buffer || value instanceof RawBuffer || isHandle(value);
+export function isBufferLike(
+    value: unknown
+): value is Buffer | RawBuffer | Handle {
+    return (
+        value instanceof Buffer || value instanceof RawBuffer || isHandle(value)
+    );
 }
 
 // -----------------------------------------------------------------------------
@@ -48,7 +52,7 @@ export function isBufferLike(value: unknown): value is Buffer | RawBuffer | Hand
 // Output handles are spread directly onto the Node for API terseness:
 //
 //   const A = v.pass(K1, { in: input });
-//   const B = v.pass(K2, { in: A.output });  
+//   const B = v.pass(K2, { in: A.output });
 //
 // Convention:
 // - Internal properties are prefixed with "_" (e.g., _id, _dependencies)
@@ -65,9 +69,16 @@ export function isBufferLike(value: unknown): value is Buffer | RawBuffer | Hand
 
 /** Reserved property names that cannot be used as output names */
 export const RESERVED_NODE_PROPERTIES = [
-    '_id', '_dependencies', '_kernel',
-    '_pipeline', '_bindGroupLayout', '_bindingEntries',
-    '_dispatch', '_bindings', '_shaderCode',
+    '_id',
+    '_dependencies',
+    '_kernel',
+    '_pipeline',
+    '_bindGroupLayout',
+    '_bindingEntries',
+    '_bounds',
+    '_dispatch',
+    '_bindings',
+    '_shaderCode'
 ] as const;
 
 /**
@@ -78,7 +89,7 @@ export function validateOutputName(name: string): void {
     if (name.startsWith('_')) {
         throw new Error(
             `Volten Error: Output name "${name}" cannot start with "_". ` +
-            `Names starting with "_" are reserved for internal properties.`
+                `Names starting with "_" are reserved for internal properties.`
         );
     }
     if (RESERVED_NODE_PROPERTIES.includes(name as any)) {
@@ -105,6 +116,8 @@ export interface NodeBase {
     readonly _bindGroupLayout: GPUBindGroupLayout;
     /** Classified binding entries (for v.run to create bind groups) */
     readonly _bindingEntries: readonly BindingEntry[];
+    /** Logical invocation bounds [x, y, z] before workgroup division */
+    readonly _bounds: readonly [number, number, number];
     /** Dispatch dimensions [x, y, z] for workgroup dispatch */
     readonly _dispatch: readonly [number, number, number];
     /** Original user-provided bindings record (for Handle resolution at run time) */
@@ -116,25 +129,26 @@ export interface NodeBase {
 /**
  * Node in the compute DAG.
  * Represents a compute pass with its dependencies and output handles.
- * 
+ *
  * Handles are spread directly onto the node for ALL buffer-like bindings
  * (Buffer, RawBuffer, Handle)
- * 
+ *
  * @example
  * ```ts
  * // Declared outputs
  * const A = v.pass(BlurKernel, { in: source, out: dest });
  * const B = v.pass(SharpenKernel, { in: A.out }); // A.out is a Handle
- * 
+ *
  * // In-place: no outputs declared, but handles still available
  * const C = v.pass(InPlaceKernel, { data: buf });
  * const D = v.pass(InPlaceKernel, { data: C.data }); // chaining works
  * ```
- * 
+ *
  * @typeParam TOutputs - Record of output names to Handle types
  */
-export type Node<TOutputs extends Record<string, Handle> = Record<string, Handle>> =
-    NodeBase & TOutputs;
+export type Node<
+    TOutputs extends Record<string, Handle> = Record<string, Handle>
+> = NodeBase & TOutputs;
 
 /**
  * Helper to extract output handles from a Node (filtering out internal properties).
@@ -157,7 +171,7 @@ export function createHandle(node: Node, name: string): Handle {
     return {
         _id: Symbol(`Handle:${name}`),
         _node: node,
-        _name: name,
+        _name: name
     };
 }
 
@@ -169,6 +183,7 @@ export interface CreateNodeOptions {
     pipeline: GPUComputePipeline;
     bindGroupLayout: GPUBindGroupLayout;
     bindingEntries: BindingEntry[];
+    bounds: [number, number, number];
     dispatch: [number, number, number];
     bindings: Record<string, unknown>;
     shaderCode: string;
@@ -177,19 +192,26 @@ export interface CreateNodeOptions {
 
 /**
  * Create a Node with handles spread directly onto it.
- * 
+ *
  * This is the primary factory for Node objects. It:
  * 1. Creates the NodeBase with all internal properties
  * 2. Creates a Handle for each buffer-like binding (Buffer, RawBuffer, Handle)
  * 3. Spreads handles directly onto the node
- * 
+ *
  * @param options - Node creation options
  * @returns A fully constructed Node with handles for all buffer-like bindings
  */
 export function createNode(options: CreateNodeOptions): Node {
     const {
-        kernel, pipeline, bindGroupLayout, bindingEntries,
-        dispatch, bindings, shaderCode, dependencies,
+        kernel,
+        pipeline,
+        bindGroupLayout,
+        bindingEntries,
+        bounds,
+        dispatch,
+        bindings,
+        shaderCode,
+        dependencies
     } = options;
 
     // Create the base node object (mutated to add handles below)
@@ -200,9 +222,10 @@ export function createNode(options: CreateNodeOptions): Node {
         _pipeline: pipeline,
         _bindGroupLayout: bindGroupLayout,
         _bindingEntries: Object.freeze(bindingEntries),
+        _bounds: Object.freeze(bounds) as readonly [number, number, number],
         _dispatch: Object.freeze(dispatch) as readonly [number, number, number],
         _bindings: Object.freeze(bindings),
-        _shaderCode: shaderCode,
+        _shaderCode: shaderCode
     };
 
     // Create and spread handles for ALL buffer-like bindings
@@ -215,4 +238,3 @@ export function createNode(options: CreateNodeOptions): Node {
 
     return node as Node;
 }
-

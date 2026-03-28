@@ -5,11 +5,12 @@ import { describe, it, expect } from 'vitest';
 import {
     Kernel,
     BUILTIN_SHORTHANDS,
+    VOLTEN_INTERNAL_BOUNDS_NAME,
     expandParameter,
     expandParameterList,
     expandBuiltinShorthands,
     injectComputeDecorators,
-    processShaderSource,
+    processShaderSource
 } from '../src/kernel/index.js';
 
 // =============================================================================
@@ -21,35 +22,35 @@ describe('Builtin Shorthands', () => {
         it('defines gid shorthand', () => {
             expect(BUILTIN_SHORTHANDS.gid).toEqual({
                 builtin: 'global_invocation_id',
-                type: 'vec3<u32>',
+                type: 'vec3<u32>'
             });
         });
 
         it('defines lid shorthand', () => {
             expect(BUILTIN_SHORTHANDS.lid).toEqual({
                 builtin: 'local_invocation_index',
-                type: 'u32',
+                type: 'u32'
             });
         });
 
         it('defines wid shorthand', () => {
             expect(BUILTIN_SHORTHANDS.wid).toEqual({
                 builtin: 'workgroup_id',
-                type: 'vec3<u32>',
+                type: 'vec3<u32>'
             });
         });
 
         it('defines lid3 shorthand', () => {
             expect(BUILTIN_SHORTHANDS.lid3).toEqual({
                 builtin: 'local_invocation_id',
-                type: 'vec3<u32>',
+                type: 'vec3<u32>'
             });
         });
 
         it('defines nwg shorthand', () => {
             expect(BUILTIN_SHORTHANDS.nwg).toEqual({
                 builtin: 'num_workgroups',
-                type: 'vec3<u32>',
+                type: 'vec3<u32>'
             });
         });
     });
@@ -87,7 +88,9 @@ describe('Builtin Shorthands', () => {
 
         it('leaves unknown names untouched', () => {
             expect(expandParameter('index: u32')).toBe('index: u32');
-            expect(expandParameter('myParam: vec3<f32>')).toBe('myParam: vec3<f32>');
+            expect(expandParameter('myParam: vec3<f32>')).toBe(
+                'myParam: vec3<f32>'
+            );
         });
 
         it('leaves existing @builtin decorators untouched', () => {
@@ -188,7 +191,9 @@ describe('Builtin Shorthands', () => {
                 output[gid.x] = input[gid.x];
             }`;
             const result = expandBuiltinShorthands(source);
-            expect(result).toContain('@builtin(global_invocation_id) gid: vec3<u32>');
+            expect(result).toContain(
+                '@builtin(global_invocation_id) gid: vec3<u32>'
+            );
         });
 
         it('only processes main function', () => {
@@ -198,7 +203,9 @@ fn main(gid: vec3<u32>) { }
 `;
             const result = expandBuiltinShorthands(source);
             // main should be expanded
-            expect(result).toContain('fn main(@builtin(global_invocation_id) gid: vec3<u32>)');
+            expect(result).toContain(
+                'fn main(@builtin(global_invocation_id) gid: vec3<u32>)'
+            );
             // helper should NOT be expanded
             expect(result).toContain('fn helper(gid: vec3<u32>)');
         });
@@ -208,8 +215,12 @@ fn main(gid: vec3<u32>) { }
                 // compute logic
             }`;
             const result = expandBuiltinShorthands(source);
-            expect(result).toContain('@builtin(global_invocation_id) gid: vec3<u32>');
-            expect(result).toContain('@builtin(local_invocation_index) lid: u32');
+            expect(result).toContain(
+                '@builtin(global_invocation_id) gid: vec3<u32>'
+            );
+            expect(result).toContain(
+                '@builtin(local_invocation_index) lid: u32'
+            );
             expect(result).toContain('@builtin(workgroup_id) wid: vec3<u32>');
         });
 
@@ -218,7 +229,9 @@ fn main(gid: vec3<u32>) { }
                 output[gid.x] = input[gid.x];
             }`;
             const result = expandBuiltinShorthands(source);
-            expect(result).toContain('@builtin(global_invocation_id) gid: vec3u');
+            expect(result).toContain(
+                '@builtin(global_invocation_id) gid: vec3u'
+            );
         });
 
         it('handles mixed shorthand syntax in parameter list', () => {
@@ -226,8 +239,12 @@ fn main(gid: vec3<u32>) { }
                 // compute logic
             }`;
             const result = expandBuiltinShorthands(source);
-            expect(result).toContain('@builtin(global_invocation_id) gid: vec3u');
-            expect(result).toContain('@builtin(local_invocation_index) lid: u32');
+            expect(result).toContain(
+                '@builtin(global_invocation_id) gid: vec3u'
+            );
+            expect(result).toContain(
+                '@builtin(local_invocation_index) lid: u32'
+            );
             expect(result).toContain('@builtin(workgroup_id) wid: vec3<u32>');
         });
     });
@@ -266,7 +283,48 @@ fn main(gid: vec3<u32>) { }`);
 }`;
             const result = processShaderSource(source, [128, 1, 1]);
             expect(result).toContain('@compute @workgroup_size(128, 1, 1)');
-            expect(result).toContain('@builtin(global_invocation_id) gid: vec3<u32>');
+            expect(result).toContain(
+                `if (any(gid >= ${VOLTEN_INTERNAL_BOUNDS_NAME}.xyz))`
+            );
+            expect(result).toContain(
+                'fn _volten_internal_user_main_entrypoint_wrapper(gid: vec3<u32>)'
+            );
+            expect(result).toContain(
+                'fn main(@builtin(global_invocation_id) gid: vec3<u32>)'
+            );
+        });
+
+        it('adds an internal gid when the user main does not declare one', () => {
+            const source = `fn main(lid: u32) {
+    output[lid] = input[lid] * 2.0;
+}`;
+            const result = processShaderSource(source, [64, 1, 1]);
+            expect(result).toContain(
+                '@builtin(local_invocation_index) lid: u32'
+            );
+            expect(result).toContain(
+                '@builtin(global_invocation_id) _volten_internal_guard_gid_builtin: vec3<u32>'
+            );
+            expect(result).toContain(
+                '_volten_internal_user_main_entrypoint_wrapper(lid);'
+            );
+        });
+
+        it('supports opting out of guarded entry-point generation', () => {
+            const source = `fn main(gid: vec3<u32>) {
+    output[gid.x] = input[gid.x] * 2.0;
+}`;
+            const result = processShaderSource(source, [128, 1, 1], {
+                unsafeManualBounds: true
+            });
+            expect(result).toContain('@compute @workgroup_size(128, 1, 1)');
+            expect(result).toContain(
+                'fn main(@builtin(global_invocation_id) gid: vec3<u32>)'
+            );
+            expect(result).not.toContain(VOLTEN_INTERNAL_BOUNDS_NAME);
+            expect(result).not.toContain(
+                '_volten_internal_user_main_entrypoint_wrapper'
+            );
         });
     });
 });
@@ -291,6 +349,11 @@ describe('Kernel Class', () => {
             const kernel = new Kernel('fn main() { }');
             expect(kernel.workgroupSize).toEqual([64, 1, 1]);
         });
+
+        it('defaults unsafeManualBounds to false', () => {
+            const kernel = new Kernel('fn main() { }');
+            expect(kernel.unsafeManualBounds).toBe(false);
+        });
     });
 
     describe('outputs normalization', () => {
@@ -298,12 +361,22 @@ describe('Kernel Class', () => {
             const kernel = new Kernel('fn main() { }', {
                 outputs: {
                     result: { definedBy: 'input' },
-                    debug: { definedBy: 'input' },
-                },
+                    debug: { definedBy: 'input' }
+                }
             });
             expect(kernel.outputs).toEqual([
-                { name: 'result', definedBy: 'input', type: undefined, size: undefined },
-                { name: 'debug', definedBy: 'input', type: undefined, size: undefined },
+                {
+                    name: 'result',
+                    definedBy: 'input',
+                    type: undefined,
+                    size: undefined
+                },
+                {
+                    name: 'debug',
+                    definedBy: 'input',
+                    type: undefined,
+                    size: undefined
+                }
             ]);
             expect(kernel.outputNames).toEqual(['result', 'debug']);
         });
@@ -312,8 +385,11 @@ describe('Kernel Class', () => {
             const kernel = new Kernel('fn main() { }', {
                 outputs: {
                     result: { type: 'array<f32>', size: 1 },
-                    partial: { definedBy: 'input', size: (data) => (data.input as any).length / 2 },
-                },
+                    partial: {
+                        definedBy: 'input',
+                        size: (data) => (data.input as any).length / 2
+                    }
+                }
             });
             expect(kernel.outputs).toHaveLength(2);
             expect(kernel.outputs[0].name).toBe('result');
@@ -327,8 +403,8 @@ describe('Kernel Class', () => {
         it('handles definedBy + explicit type hybrid', () => {
             const kernel = new Kernel('fn main() { }', {
                 outputs: {
-                    out: { definedBy: 'input', type: 'array<vec3f>' },
-                },
+                    out: { definedBy: 'input', type: 'array<vec3f>' }
+                }
             });
             expect(kernel.outputs[0].definedBy).toBe('input');
             expect(kernel.outputs[0].type).toBe('array<vec3f>');
@@ -338,21 +414,21 @@ describe('Kernel Class', () => {
     describe('workgroupSize normalization', () => {
         it('normalizes partial tuple', () => {
             const kernel = new Kernel('fn main() { }', {
-                workgroupSize: [256],
+                workgroupSize: [256]
             });
             expect(kernel.workgroupSize).toEqual([256, 1, 1]);
         });
 
         it('normalizes two-element tuple', () => {
             const kernel = new Kernel('fn main() { }', {
-                workgroupSize: [16, 16],
+                workgroupSize: [16, 16]
             });
             expect(kernel.workgroupSize).toEqual([16, 16, 1]);
         });
 
         it('passes through full tuple', () => {
             const kernel = new Kernel('fn main() { }', {
-                workgroupSize: [4, 4, 4],
+                workgroupSize: [4, 4, 4]
             });
             expect(kernel.workgroupSize).toEqual([4, 4, 4]);
         });
@@ -370,7 +446,8 @@ describe('Kernel Class', () => {
         });
 
         it('stores function threads spec', () => {
-            const fn = (data: Record<string, unknown>) => [100, 1, 1] as [number, number, number];
+            const fn = (data: Record<string, unknown>) =>
+                [100, 1, 1] as [number, number, number];
             const kernel = new Kernel('fn main() { }', { threads: fn });
             expect(kernel.threads).toBe(fn);
         });
@@ -378,25 +455,39 @@ describe('Kernel Class', () => {
 
     describe('assembledSource', () => {
         it('expands shorthands and injects decorators', () => {
-            const kernel = new Kernel(`
+            const kernel = new Kernel(
+                `
 fn main(gid: vec3<u32>) {
     output[gid.x] = input[gid.x];
 }
-`, { workgroupSize: [128] });
+`,
+                { workgroupSize: [128] }
+            );
 
-            expect(kernel.assembledSource).toContain('@compute @workgroup_size(128, 1, 1)');
-            expect(kernel.assembledSource).toContain('@builtin(global_invocation_id) gid: vec3<u32>');
+            expect(kernel.assembledSource).toContain(
+                '@compute @workgroup_size(128, 1, 1)'
+            );
+            expect(kernel.assembledSource).toContain(
+                '@builtin(global_invocation_id) gid: vec3<u32>'
+            );
         });
 
         it('expands vec3u shorthands and injects decorators', () => {
-            const kernel = new Kernel(`
+            const kernel = new Kernel(
+                `
 fn main(gid: vec3u) {
     output[gid.x] = input[gid.x];
 }
-`, { workgroupSize: [128] });
+`,
+                { workgroupSize: [128] }
+            );
 
-            expect(kernel.assembledSource).toContain('@compute @workgroup_size(128, 1, 1)');
-            expect(kernel.assembledSource).toContain('@builtin(global_invocation_id) gid: vec3u');
+            expect(kernel.assembledSource).toContain(
+                '@compute @workgroup_size(128, 1, 1)'
+            );
+            expect(kernel.assembledSource).toContain(
+                '@builtin(global_invocation_id) gid: vec3u'
+            );
         });
 
         it('caches assembled source', () => {

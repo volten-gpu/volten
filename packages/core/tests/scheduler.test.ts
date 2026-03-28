@@ -12,13 +12,14 @@ function makeNode(idStr: string, dependencies: Node[] = []): Node {
         _pipeline: {} as any,
         _bindGroupLayout: {} as any,
         _bindingEntries: [],
+        _bounds: [1, 1, 1],
         _dispatch: [1, 1, 1],
         _bindings: {},
-        _shaderCode: '',
+        _shaderCode: ''
     } as any as Node;
 }
 
-describe('DAG Scheduler (Kahn\'s Algorithm)', () => {
+describe("DAG Scheduler (Kahn's Algorithm)", () => {
     it('sorts a linear chain', () => {
         // A -> B -> C
         const A = makeNode('A');
@@ -158,7 +159,7 @@ describe('DAG Scheduler (Kahn\'s Algorithm)', () => {
         const sorted2 = topologicalSort([B, A], priority);
 
         expect(sorted2).toHaveLength(2);
-        expect(sorted2[0]).toBe(A);    // A before B due to lower priority
+        expect(sorted2[0]).toBe(A); // A before B due to lower priority
         expect(sorted2[1]).toBe(B);
     });
 

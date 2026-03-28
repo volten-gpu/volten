@@ -38,14 +38,16 @@ import { PipelineCache } from './graph/pipeline-cache.js';
 import {
     generateBindings,
     assembleFullShader,
-    resolveDispatch,
+    resolveBounds,
+    resolveDispatch
 } from './kernel/bindings.js';
+import { VOLTEN_INTERNAL_BOUNDS_NAME } from './kernel/builtins.js';
 import {
     createNode,
     getNodeOutputs,
     type Node,
     type Handle,
-    isHandle,
+    isHandle
 } from './graph/node.js';
 import { compile, type ExecutionPlan } from './graph/compiler.js';
 import { Buffer } from './data/buffer.js';
@@ -55,7 +57,7 @@ import { getTypedArrayForType } from './utils/alignment.js';
 import {
     resolveUniformLayoutMode,
     type UniformLayoutMode,
-    type UniformLayoutPreference,
+    type UniformLayoutPreference
 } from './utils/uniform-layout.js';
 
 /**
@@ -63,9 +65,27 @@ import {
  */
 export type ReadTarget = Node | Buffer | RawBuffer | Handle;
 
+const BOUNDS_GUARD_BARRIER_REGEX = /\b(?:workgroupBarrier|storageBarrier)\s*\(/;
+
+function dispatchNeedsBoundsGuard(
+    bounds: [number, number, number],
+    dispatch: [number, number, number],
+    workgroupSize: [number, number, number]
+): boolean {
+    return (
+        dispatch[0] * workgroupSize[0] !== bounds[0] ||
+        dispatch[1] * workgroupSize[1] !== bounds[1] ||
+        dispatch[2] * workgroupSize[2] !== bounds[2]
+    );
+}
+
+function kernelUsesBarrier(source: string): boolean {
+    return BOUNDS_GUARD_BARRIER_REGEX.test(source);
+}
+
 /**
  * The main Volten context - the "v" instance
- * 
+ *
  * This is created via the volten() factory function.
  * Contains methods for scheduling GPU compute work.
  */
@@ -80,41 +100,46 @@ export class VoltenContext {
 
     constructor(
         device: GPUDevice,
-        options?: { label?: string; uniformLayoutMode?: UniformLayoutPreference }
+        options?: {
+            label?: string;
+            uniformLayoutMode?: UniformLayoutPreference;
+        }
     ) {
         this.device = device;
         this.label = options?.label;
         this._pipelineCache = new PipelineCache();
-        this._uniformLayoutMode = resolveUniformLayoutMode(options?.uniformLayoutMode);
+        this._uniformLayoutMode = resolveUniformLayoutMode(
+            options?.uniformLayoutMode
+        );
     }
 
     /**
      * Create a compute pass node.
-     * 
+     *
      * This is the central API for building compute DAGs. It:
      * 1. Validates and classifies bindings (Buffer, RawBuffer, Uniform, Handle)
-     * 2. Generates WGSL binding declarations
-     * 3. Assembles the full shader (bindings + kernel source)
-     * 4. Creates or reuses a cached compute pipeline
-     * 5. Resolves thread dispatch dimensions
+     * 2. Resolves logical invocation bounds and workgroup dispatch
+     * 3. Generates WGSL binding declarations
+     * 4. Assembles the full shader (bindings + kernel source)
+     * 5. Creates or reuses a cached compute pipeline
      * 6. Returns a Node with output Handles for DAG chaining
-     * 
+     *
      * @param kernel - The kernel to execute
      * @param bindings - Input/output bindings (Buffer, RawBuffer, Uniform, or Handle from previous pass)
      * @param options - Optional pass configuration (e.g., thread override)
      * @returns A Node handle for chaining or execution
-     * 
+     *
      * @example
      * ```ts
      * const input = new Buffer([1, 2, 3, 4], "f32");
      * const output = new Buffer([0, 0, 0, 0], "f32", "rw");
-     * 
+     *
      * const A = v.pass(new Kernel(`
      *   fn main(gid: vec3u) {
      *     output[gid.x] = input[gid.x] * 2.0;
      *   }
      * `, { threads: 'input' }), { input, output });
-     * 
+     *
      * // Chain passes:
      * const B = v.pass(AnotherKernel, { data: A.output, result: resultBuf });
      * ```
@@ -128,31 +153,58 @@ export class VoltenContext {
         if (!(kernel instanceof Kernel)) {
             throw new Error(
                 'Volten Error: First argument to v.pass() must be a Kernel instance.\n' +
-                '  Example: v.pass(new Kernel(`fn main(gid: vec3u) { ... }`), { ... })'
+                    '  Example: v.pass(new Kernel(`fn main(gid: vec3u) { ... }`), { ... })'
             );
         }
 
-        // 2. Generate binding entries (classify & validate)
-        const bindingEntries = generateBindings(bindings, kernel, {
-            uniformLayoutMode: this._uniformLayoutMode,
+        if (VOLTEN_INTERNAL_BOUNDS_NAME in bindings) {
+            throw new Error(
+                `Volten Error: Binding name "${VOLTEN_INTERNAL_BOUNDS_NAME}" is reserved for internal use.`
+            );
+        }
+
+        // 2. Resolve logical bounds and physical dispatch dimensions
+        const bounds = resolveBounds(kernel, bindings, options?.threads);
+        const dispatch = resolveDispatch(kernel, bindings, options?.threads);
+
+        if (
+            !kernel.unsafeManualBounds &&
+            kernelUsesBarrier(kernel.source) &&
+            dispatchNeedsBoundsGuard(bounds, dispatch, kernel.workgroupSize)
+        ) {
+            throw new Error(
+                'Volten Error: This kernel uses workgroup/storage barriers and also requires a guarded partial workgroup.\n' +
+                    '  An injected early-return wrapper would be unsafe here.\n' +
+                    '  Fix one of these:\n' +
+                    '  1. Make threads an exact multiple of workgroupSize\n' +
+                    '  2. Set unsafeManualBounds: true and handle bounds manually in WGSL'
+            );
+        }
+
+        const executionBindings = kernel.unsafeManualBounds
+            ? bindings
+            : {
+                  ...bindings,
+                  [VOLTEN_INTERNAL_BOUNDS_NAME]: new Uniform(
+                      [bounds[0], bounds[1], bounds[2], 0],
+                      'vec4u'
+                  )
+              };
+
+        // 3. Generate binding entries (classify & validate)
+        const bindingEntries = generateBindings(executionBindings, kernel, {
+            uniformLayoutMode: this._uniformLayoutMode
         });
 
-        // 3. Assemble full shader source
+        // 4. Assemble full shader source
         const shaderCode = assembleFullShader(kernel, bindingEntries, {
-            uniformLayoutMode: this._uniformLayoutMode,
+            uniformLayoutMode: this._uniformLayoutMode
         });
 
-        // 4. Get or create pipeline
+        // 5. Get or create pipeline
         const { pipeline, bindGroupLayout } = this._pipelineCache.getOrCreate(
             this.device,
             shaderCode
-        );
-
-        // 5. Resolve dispatch dimensions
-        const dispatch = resolveDispatch(
-            kernel,
-            bindings,
-            options?.threads
         );
 
         // 6. Collect dependencies (nodes that provide Handle inputs)
@@ -171,10 +223,11 @@ export class VoltenContext {
             pipeline,
             bindGroupLayout,
             bindingEntries,
+            bounds: [...bounds],
             dispatch: [...dispatch],
             bindings,
             shaderCode,
-            dependencies,
+            dependencies
         });
     }
 
@@ -183,7 +236,9 @@ export class VoltenContext {
      * - Buffer / RawBuffer → returns self
      * - Handle → recursively walks up the Handle chain to find the actual buffer
      */
-    private _resolveConcreteBuffer(value: Buffer | RawBuffer | Handle): Buffer | RawBuffer {
+    private _resolveConcreteBuffer(
+        value: Buffer | RawBuffer | Handle
+    ): Buffer | RawBuffer {
         if (value instanceof Buffer || value instanceof RawBuffer) {
             return value;
         }
@@ -191,7 +246,9 @@ export class VoltenContext {
             // Recursively resolve: the source node's binding for this name
             // may itself be a Handle (multi-level chaining)
             const sourceBinding = value._node._bindings[value._name];
-            return this._resolveConcreteBuffer(sourceBinding as Buffer | RawBuffer | Handle);
+            return this._resolveConcreteBuffer(
+                sourceBinding as Buffer | RawBuffer | Handle
+            );
         }
         throw new Error(
             `Volten Error: Cannot resolve concrete buffer from binding of type ${typeof value}.`
@@ -201,7 +258,9 @@ export class VoltenContext {
     /**
      * Resolve a binding value to its GPUBuffer.
      */
-    private _resolveGPUBuffer(value: Buffer | RawBuffer | Uniform | Handle): GPUBuffer {
+    private _resolveGPUBuffer(
+        value: Buffer | RawBuffer | Uniform | Handle
+    ): GPUBuffer {
         if (value instanceof Uniform) {
             return value.ensure(this.device);
         }
@@ -268,16 +327,18 @@ export class VoltenContext {
             }
 
             // Build bind group entries, resolving Handles to actual GPUBuffers
-            const bgEntries: GPUBindGroupEntry[] = node._bindingEntries.map((entry) => ({
-                binding: entry.index,
-                resource: {
-                    buffer: this._resolveGPUBuffer(entry.source),
-                },
-            }));
+            const bgEntries: GPUBindGroupEntry[] = node._bindingEntries.map(
+                (entry) => ({
+                    binding: entry.index,
+                    resource: {
+                        buffer: this._resolveGPUBuffer(entry.source)
+                    }
+                })
+            );
 
             const bindGroup = this.device.createBindGroup({
                 layout: node._bindGroupLayout,
-                entries: bgEntries,
+                entries: bgEntries
             });
 
             // Check for dependencies within the current pass
@@ -311,7 +372,7 @@ export class VoltenContext {
             pass.dispatchWorkgroups(
                 node._dispatch[0],
                 node._dispatch[1],
-                node._dispatch[2],
+                node._dispatch[2]
             );
 
             // Mark this node as executed in the current pass
@@ -372,12 +433,19 @@ export class VoltenContext {
         // 1. Determine all unique concrete buffers we need to read
         // this is necessary to prevent duplicate requests
         // Mapping from Concrete Buffer -> { staging: GPUBuffer, size: number }
-        const uniqueBuffers = new Map<Buffer | RawBuffer, { staging: GPUBuffer; size: number }>();
+        const uniqueBuffers = new Map<
+            Buffer | RawBuffer,
+            { staging: GPUBuffer; size: number }
+        >();
 
         // once we retrieve all the buffers, we'll iterate through these "plans" to map
         // the resolved arrays to the appropriate return targets
         type TargetPlan =
-            | { type: 'node'; node: Node; outputs: { name: string; concrete: Buffer | RawBuffer }[] }
+            | {
+                  type: 'node';
+                  node: Node;
+                  outputs: { name: string; concrete: Buffer | RawBuffer }[];
+              }
             | { type: 'buffer'; concrete: Buffer | RawBuffer };
 
         const targetPlans: TargetPlan[] = [];
@@ -385,7 +453,10 @@ export class VoltenContext {
         for (const t of targets) {
             if (t instanceof Buffer || t instanceof RawBuffer || isHandle(t)) {
                 const concrete = this._resolveConcreteBuffer(t);
-                uniqueBuffers.set(concrete, { staging: null!, size: concrete.byteLength });
+                uniqueBuffers.set(concrete, {
+                    staging: null!,
+                    size: concrete.byteLength
+                });
                 targetPlans.push({ type: 'buffer', concrete });
             } else {
                 // It's a Node
@@ -394,15 +465,21 @@ export class VoltenContext {
                 if (outputNames.length === 0) {
                     throw new Error(
                         'Volten Error: v.read() called on a node with no declared outputs.\n' +
-                        '  Hint: Make sure your Kernel has outputs declared, e.g.:\n' +
-                        '    new Kernel(`...`, { outputs: [\'result\'] })'
+                            '  Hint: Make sure your Kernel has outputs declared, e.g.:\n' +
+                            "    new Kernel(`...`, { outputs: ['result'] })"
                     );
                 }
-                const outputs: { name: string; concrete: Buffer | RawBuffer }[] = [];
+                const outputs: {
+                    name: string;
+                    concrete: Buffer | RawBuffer;
+                }[] = [];
                 for (const name of outputNames) {
                     const handle = nodeOutputs[name];
                     const concrete = this._resolveConcreteBuffer(handle);
-                    uniqueBuffers.set(concrete, { staging: null!, size: concrete.byteLength });
+                    uniqueBuffers.set(concrete, {
+                        staging: null!,
+                        size: concrete.byteLength
+                    });
                     outputs.push({ name, concrete });
                 }
                 targetPlans.push({ type: 'node', node: t as Node, outputs });
@@ -420,7 +497,7 @@ export class VoltenContext {
             const gpuBuffer = concrete.ensure(this.device);
             const staging = this.device.createBuffer({
                 size: info.size,
-                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
             });
             info.staging = staging;
             encoder.copyBufferToBuffer(gpuBuffer, 0, staging, 0, info.size);
@@ -429,13 +506,20 @@ export class VoltenContext {
         this.device.queue.submit([encoder.finish()]);
 
         // 3. Map memory and extract TypedArrays
-        const materializedBuffers = new Map<Buffer | RawBuffer, ArrayBufferView | ArrayBuffer>();
+        const materializedBuffers = new Map<
+            Buffer | RawBuffer,
+            ArrayBufferView | ArrayBuffer
+        >();
 
         for (const [concrete, info] of uniqueBuffers.entries()) {
             await info.staging.mapAsync(GPUMapMode.READ);
             const mappedRange = info.staging.getMappedRange().slice(0); // Clone the data securely
 
-            let TypedArrayConstructor: Float32ArrayConstructor | Uint32ArrayConstructor | Int32ArrayConstructor | undefined = Float32Array;
+            let TypedArrayConstructor:
+                | Float32ArrayConstructor
+                | Uint32ArrayConstructor
+                | Int32ArrayConstructor
+                | undefined = Float32Array;
             if (concrete instanceof Buffer) {
                 TypedArrayConstructor = getTypedArrayForType(concrete.type);
             }
@@ -454,11 +538,12 @@ export class VoltenContext {
         }
 
         // 4. Reconstruct results
-        const results = targetPlans.map(plan => {
+        const results = targetPlans.map((plan) => {
             if (plan.type === 'buffer') {
                 return materializedBuffers.get(plan.concrete)!;
             } else {
-                const record: Record<string, ArrayBufferView | ArrayBuffer> = {};
+                const record: Record<string, ArrayBufferView | ArrayBuffer> =
+                    {};
                 for (const out of plan.outputs) {
                     record[out.name] = materializedBuffers.get(out.concrete)!;
                 }
