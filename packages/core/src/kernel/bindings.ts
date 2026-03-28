@@ -274,7 +274,7 @@ export function assembleFullShader(
 export function resolveBounds(
     kernel: Kernel,
     bindings: Record<string, unknown>,
-    passThreads?: number | [number, number] | [number, number, number]
+    passThreads?: number | [number] | [number, number] | [number, number, number]
 ): [number, number, number] {
     if (passThreads !== undefined) {
         if (typeof passThreads === 'number') {
@@ -350,7 +350,7 @@ export function resolveBounds(
 export function resolveDispatch(
     kernel: Kernel,
     bindings: Record<string, unknown>,
-    passThreads?: number | [number, number] | [number, number, number]
+    passThreads?: number | [number] | [number, number] | [number, number, number]
 ): [number, number, number] {
     const bounds = resolveBounds(kernel, bindings, passThreads);
     return threadsToDispatch3D(bounds, kernel.workgroupSize);
@@ -415,13 +415,17 @@ function threadsToDispatch3D(
 }
 
 /**
- * Normalize a 2D or 3D thread count to 3D.
+ * Normalize a 1D, 2D, or 3D thread count to 3D.
+ * [x] -> [x, 1, 1]
  * [x, y] → [x, y, 1]
  * [x, y, z] → [x, y, z]
  */
 function normalizeThreads(
-    threads: [number, number] | [number, number, number]
+    threads: [number] | [number, number] | [number, number, number]
 ): [number, number, number] {
+    if (threads.length === 1) {
+        return [threads[0], 1, 1];
+    }
     if (threads.length === 2) {
         return [threads[0], threads[1], 1];
     }

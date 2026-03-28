@@ -437,6 +437,12 @@ describe('Thread Dispatch Resolution', () => {
 
             expect(resolveBounds(kernel, {}, [130, 5, 2])).toEqual([130, 5, 2]);
         });
+
+        it('normalizes a single-element pass-time thread tuple to 1D bounds', () => {
+            const kernel = new Kernel('fn main() { }');
+
+            expect(resolveBounds(kernel, {}, [130])).toEqual([130, 1, 1]);
+        });
     });
 
     describe('resolveDispatch()', () => {
@@ -492,6 +498,14 @@ describe('Thread Dispatch Resolution', () => {
 
             // ceil(192/64)=3, ceil(3/1)=3, ceil(3/1)=3
             expect(dispatch).toEqual([3, 3, 3]);
+        });
+
+        it('single-element pass-time thread tuples are treated as 1D total invocations', () => {
+            const kernel = new Kernel('fn main() { }', { threads: 64 });
+            const dispatch = resolveDispatch(kernel, {}, [128]);
+
+            // [128] -> [128, 1, 1] -> 128 / 64 = 2 dispatches
+            expect(dispatch).toEqual([2, 1, 1]);
         });
 
         it('auto-infers from single buffer binding', () => {
@@ -1086,6 +1100,20 @@ fn main(gid: vec3u) {
         const node = v.pass(kernel, { input }, { threads: 256 });
 
         // 256 / 64 = 4
+        expect(node._dispatch).toEqual([4, 1, 1]);
+    });
+
+    it('accepts a single-element pass-time thread tuple', () => {
+        const v = createMockVoltenContext();
+        const input = makeBuffer([1, 2, 3, 4], 'f32', 'r');
+
+        const kernel = new Kernel('fn main(gid: vec3u) { }', {
+            threads: 4
+        });
+
+        const node = v.pass(kernel, { input }, { threads: [256] });
+
+        expect(node._bounds).toEqual([256, 1, 1]);
         expect(node._dispatch).toEqual([4, 1, 1]);
     });
 

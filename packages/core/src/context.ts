@@ -27,10 +27,11 @@ export interface PassOptions {
     /**
      * Override thread dispatch count for this specific pass.
      * - number: Total 1D thread count
+     * - [number]: Total 1D invocations
      * - [number, number]: Total 2D invocations (z defaults to 1)
      * - [number, number, number]: Total 3D invocations
      */
-    threads?: number | [number, number] | [number, number, number];
+    threads?: number | [number] | [number, number] | [number, number, number];
 }
 
 import { Kernel } from './kernel/kernel.js';
