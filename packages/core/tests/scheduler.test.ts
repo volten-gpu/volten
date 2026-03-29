@@ -12,6 +12,7 @@ function makeNode(idStr: string, dependencies: Node[] = []): Node {
         _pipeline: {} as any,
         _bindGroupLayout: {} as any,
         _bindingEntries: [],
+        _ownedResources: [],
         _bounds: [1, 1, 1],
         _dispatch: [1, 1, 1],
         _bindings: {},

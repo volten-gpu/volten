@@ -53,6 +53,7 @@ import {
     isHandle
 } from './graph/node.js';
 import { compile, type ExecutionPlan } from './graph/compiler.js';
+import { collectNodesFromMultiple } from './graph/scheduler.js';
 import { Buffer } from './data/buffer.js';
 import { RawBuffer } from './data/raw-buffer.js';
 import { Uniform } from './data/uniform.js';
@@ -179,16 +180,20 @@ export class VoltenContext {
             );
         }
 
-        const executionBindings = kernel.unsafeManualBounds
-            ? bindings
-            : {
+        let boundsUniform: Uniform | null = null;
+        if (!kernel.unsafeManualBounds) {
+            boundsUniform = new Uniform([bounds[0], bounds[1], bounds[2], 0], 'vec4u', {
+                label: `${kernel.label} bounds`
+            });
+        }
+
+        const executionBindings = boundsUniform
+            ? {
                   ...bindings,
-                  [VOLTEN_INTERNAL_BOUNDS_NAME]: new Uniform(
-                      [bounds[0], bounds[1], bounds[2], 0],
-                      'vec4u',
-                      { label: `${kernel.label} bounds` }
-                  )
-              };
+                  [VOLTEN_INTERNAL_BOUNDS_NAME]: boundsUniform
+              }
+            : bindings;
+        const ownedResources = boundsUniform ? [boundsUniform] : [];
 
         // 3. Generate binding entries (classify & validate)
         const bindingEntries = generateBindings(executionBindings, kernel, {
@@ -223,6 +228,7 @@ export class VoltenContext {
             pipeline,
             bindGroupLayout,
             bindingEntries,
+            ownedResources,
             bounds: [...bounds],
             dispatch: [...dispatch],
             bindings,
@@ -423,6 +429,28 @@ export class VoltenContext {
         const plan = this._compile(terminals);
         this._submit(plan);
         await this.device.queue.onSubmittedWorkDone();
+    }
+
+    /**
+     * Release Volten-owned internal resources for one or more nodes.
+     *
+     * This walks the reachable dependency subtree and destroys only resources
+     * created by Volten itself (for example hidden bounds uniforms). User
+     * buffers and user-provided uniforms are never touched.
+     *
+     * Calling v.destroy(node) multiple times is safe.
+     *
+     * @param node - Terminal node(s) whose internal subtree resources should be released
+     */
+    destroy(node: Node | Node[]): void {
+        const terminals = Array.isArray(node) ? node : [node];
+        const reachable = collectNodesFromMultiple(terminals);
+
+        for (const current of reachable) {
+            for (const resource of current._ownedResources) {
+                resource.destroy();
+            }
+        }
     }
 
     /**

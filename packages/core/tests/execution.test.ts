@@ -286,4 +286,73 @@ fn main(gid: vec3u) {
         uniform.set(3.0);
         expect(mockWriteBuffer).toHaveBeenCalledTimes(1);
     });
+
+    it('v.destroy() recursively destroys only Volten-owned internal resources', () => {
+        const input = new Buffer([1], 'f32');
+        const mid = new Buffer([0], 'f32');
+        const output = new Buffer([0], 'f32');
+        const multiplier = new Uniform(2.0, 'f32');
+
+        const K1 = new Kernel('fn main() {}', {
+            outputs: { mid: { definedBy: 'input' } },
+            threads: 'input'
+        });
+        const K2 = new Kernel('fn main() {}', {
+            outputs: { output: { definedBy: 'data' } },
+            threads: 'data'
+        });
+
+        const A = v.pass(K1, { input, mid });
+        const B = v.pass(K2, { data: A.mid, output, multiplier });
+
+        v.run(B);
+
+        expect(multiplier.isUploaded).toBe(true);
+
+        v.destroy(B);
+
+        expect(mockDestroy).toHaveBeenCalledTimes(2);
+        expect(multiplier.isUploaded).toBe(true);
+    });
+
+    it('v.destroy() is idempotent', () => {
+        const input = new Buffer([1], 'f32');
+        const K = new Kernel('fn main() {}', { threads: 'data' });
+        const node = v.pass(K, { data: input });
+
+        v.run(node);
+        v.destroy(node);
+
+        expect(mockDestroy).toHaveBeenCalledTimes(1);
+
+        v.destroy(node);
+
+        expect(mockDestroy).toHaveBeenCalledTimes(1);
+    });
+
+    it('v.destroy() allows reruns by recreating internal bounds resources', () => {
+        const input = new Buffer([1, 2, 3], 'f32');
+        const K = new Kernel('fn main(gid: vec3u) { data[gid.x] = data[gid.x]; }', {
+            threads: 3
+        });
+        const node = v.pass(K, { data: input });
+
+        v.run(node);
+
+        const initialUniformBufferCreations = mockCreateBuffer.mock.calls.filter(
+            (call) => (call[0].usage & GPUBufferUsage.UNIFORM) !== 0
+        ).length;
+
+        expect(initialUniformBufferCreations).toBe(1);
+
+        v.destroy(node);
+        v.run(node);
+
+        const totalUniformBufferCreations = mockCreateBuffer.mock.calls.filter(
+            (call) => (call[0].usage & GPUBufferUsage.UNIFORM) !== 0
+        ).length;
+
+        expect(mockDestroy).toHaveBeenCalledTimes(1);
+        expect(totalUniformBufferCreations).toBe(2);
+    });
 });

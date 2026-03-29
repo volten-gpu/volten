@@ -78,12 +78,24 @@ export const RESERVED_NODE_PROPERTIES = [
     '_pipeline',
     '_bindGroupLayout',
     '_bindingEntries',
+    '_ownedResources',
     '_bounds',
     '_dispatch',
     '_bindings',
     '_shaderCode',
     '_label'
 ] as const;
+
+/**
+ * Internal GPU-backed resource owned by a node.
+ *
+ * These resources are created by Volten itself (not by the user) and may be
+ * explicitly released via v.destroy(node) without affecting user-managed
+ * buffers or uniforms.
+ */
+export interface NodeOwnedResource {
+    destroy(): void;
+}
 
 /**
  * Validates that an output name doesn't conflict with internal properties.
@@ -122,6 +134,8 @@ export interface NodeBase {
     readonly _bindGroupLayout: GPUBindGroupLayout;
     /** Classified binding entries (for v.run to create bind groups) */
     readonly _bindingEntries: readonly BindingEntry[];
+    /** Internal resources owned by this node and safe for Volten to destroy */
+    readonly _ownedResources: readonly NodeOwnedResource[];
     /** Logical invocation bounds [x, y, z] before workgroup division */
     readonly _bounds: readonly [number, number, number];
     /** Dispatch dimensions [x, y, z] for workgroup dispatch */
@@ -190,6 +204,7 @@ export interface CreateNodeOptions {
     pipeline: GPUComputePipeline;
     bindGroupLayout: GPUBindGroupLayout;
     bindingEntries: BindingEntry[];
+    ownedResources?: NodeOwnedResource[];
     bounds: [number, number, number];
     dispatch: [number, number, number];
     bindings: Record<string, unknown>;
@@ -215,6 +230,7 @@ export function createNode(options: CreateNodeOptions): Node {
         pipeline,
         bindGroupLayout,
         bindingEntries,
+        ownedResources = [],
         bounds,
         dispatch,
         bindings,
@@ -232,6 +248,7 @@ export function createNode(options: CreateNodeOptions): Node {
         _pipeline: pipeline,
         _bindGroupLayout: bindGroupLayout,
         _bindingEntries: Object.freeze(bindingEntries),
+        _ownedResources: Object.freeze([...ownedResources]),
         _bounds: Object.freeze(bounds) as readonly [number, number, number],
         _dispatch: Object.freeze(dispatch) as readonly [number, number, number],
         _bindings: Object.freeze(bindings),
