@@ -2,6 +2,7 @@
 // Stores shader source code, output declarations, and thread configuration
 
 import { processShaderSource } from './builtins.js';
+import { makeLabel } from '../utils/labels.js';
 
 const BARRIER_USAGE_REGEX = /\b(?:workgroupBarrier|storageBarrier)\s*\(/;
 
@@ -63,6 +64,9 @@ export type ThreadsSpec =
  * Options for Kernel creation
  */
 export interface KernelOptions {
+    /** Optional human-friendly label for debugger/devtools usage. */
+    label?: string;
+
     /**
      * Output declarations for pool-allocation preparation.
      *
@@ -157,6 +161,9 @@ export interface NormalizedOutput {
  * ```
  */
 export class Kernel {
+    /** Human-friendly debug label */
+    readonly label: string;
+
     /** The original user-provided WGSL source */
     readonly source: string;
 
@@ -181,6 +188,7 @@ export class Kernel {
     private _assembledSource: string | null = null;
 
     constructor(source: string, options?: KernelOptions) {
+        this.label = makeLabel('Kernel', options?.label);
         this.source = source;
         this.outputs = this.normalizeOutputs(options?.outputs);
         this.workgroupSize = this.normalizeWorkgroupSize(

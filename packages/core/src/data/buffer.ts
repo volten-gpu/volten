@@ -4,6 +4,7 @@
 
 import { type TypeDescriptor, getWgslType } from '../types/schema.js';
 import { pack, getStride } from '../utils/alignment.js';
+import { makeLabel } from '../utils/labels.js';
 
 /**
  * Buffer access mode (controls shader access, not CPU access)
@@ -14,6 +15,11 @@ import { pack, getStride } from '../utils/alignment.js';
  * regardless of access mode — this is expected for updating constants.
  */
 export type BufferAccess = 'r' | 'rw';
+
+export interface BufferOptions {
+    /** Optional human-friendly label for debugger/devtools usage. */
+    label?: string;
+}
 
 /**
  * Buffer class for GPU storage buffers
@@ -40,6 +46,9 @@ export type BufferAccess = 'r' | 'rw';
  * ], Particle, "rw");
  */
 export class Buffer {
+    /** Human-friendly debug label */
+    readonly label: string;
+
     /** The type descriptor for elements in this buffer */
     readonly type: TypeDescriptor;
 
@@ -64,8 +73,10 @@ export class Buffer {
     constructor(
         data: ArrayLike<unknown>,
         type: TypeDescriptor,
-        access: BufferAccess = 'rw'
+        access: BufferAccess = 'rw',
+        options?: BufferOptions
     ) {
+        this.label = makeLabel('Buffer', options?.label);
         this.type = type;
         this.access = access;
         this.count = data.length;
@@ -108,6 +119,7 @@ export class Buffer {
 
         // Create GPU buffer with storage usage + copy flags for readback
         this.gpuBuffer = device.createBuffer({
+            label: this.label,
             size: this.byteLength,
             usage:
                 GPUBufferUsage.STORAGE |

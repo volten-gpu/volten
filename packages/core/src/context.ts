@@ -32,6 +32,8 @@ export interface PassOptions {
      * - [number, number, number]: Total 3D invocations
      */
     threads?: number | [number] | [number, number] | [number, number, number];
+    /** Optional human-friendly label for the created node/pass. */
+    label?: string;
 }
 
 import { Kernel } from './kernel/kernel.js';
@@ -60,6 +62,7 @@ import {
     type UniformLayoutMode,
     type UniformLayoutPreference
 } from './utils/uniform-layout.js';
+import { makeNodeLabel } from './utils/labels.js';
 
 /**
  * Valid targets for reading back data to the CPU.
@@ -182,7 +185,8 @@ export class VoltenContext {
                   ...bindings,
                   [VOLTEN_INTERNAL_BOUNDS_NAME]: new Uniform(
                       [bounds[0], bounds[1], bounds[2], 0],
-                      'vec4u'
+                      'vec4u',
+                      { label: `${kernel.label} bounds` }
                   )
               };
 
@@ -199,7 +203,8 @@ export class VoltenContext {
         // 5. Get or create pipeline
         const { pipeline, bindGroupLayout } = this._pipelineCache.getOrCreate(
             this.device,
-            shaderCode
+            shaderCode,
+            kernel.label
         );
 
         // 6. Collect dependencies (nodes that provide Handle inputs)
@@ -222,7 +227,8 @@ export class VoltenContext {
             dispatch: [...dispatch],
             bindings,
             shaderCode,
-            dependencies
+            dependencies,
+            label: makeNodeLabel(kernel.label, options?.label)
         });
     }
 
@@ -299,7 +305,11 @@ export class VoltenContext {
      * @param plan - The compiled execution plan
      */
     private _submit(plan: ExecutionPlan): void {
-        const encoder = this.device.createCommandEncoder();
+        const encoder = this.device.createCommandEncoder({
+            label: this.label
+                ? `${this.label} command encoder`
+                : 'Volten command encoder'
+        });
 
         // We'll try to re-use the pass & current pipeline
         // as much as possible without beginning new compute passes
@@ -334,6 +344,7 @@ export class VoltenContext {
             );
 
             const bindGroup = this.device.createBindGroup({
+                label: `${node._label} bind group`,
                 layout: node._bindGroupLayout,
                 entries: bgEntries
             });
@@ -356,7 +367,9 @@ export class VoltenContext {
                     nodesInCurrentPass.clear();
                     currentPipeline = null;
                 }
-                pass = encoder.beginComputePass();
+                pass = encoder.beginComputePass({
+                    label: `Volten compute pass starting at ${node._label}`
+                });
             }
 
             // Set pipeline only if changed
@@ -487,12 +500,17 @@ export class VoltenContext {
             return isArrayTarget ? [] : undefined;
         }
 
-        const encoder = this.device.createCommandEncoder();
+        const encoder = this.device.createCommandEncoder({
+            label: this.label
+                ? `${this.label} readback encoder`
+                : 'Volten readback encoder'
+        });
 
         // 2. Create staging buffers and issue copies
         for (const [concrete, info] of uniqueBuffers.entries()) {
             const gpuBuffer = concrete.ensure(this.device);
             const staging = this.device.createBuffer({
+                label: `${concrete.label} readback`,
                 size: info.size,
                 usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
             });

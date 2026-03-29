@@ -32,7 +32,11 @@ export class PipelineCache {
      * @param shaderCode - Full assembled WGSL source (bindings + kernel)
      * @returns Pipeline and bind group layout
      */
-    getOrCreate(device: GPUDevice, shaderCode: string): CachedPipeline {
+    getOrCreate(
+        device: GPUDevice,
+        shaderCode: string,
+        label?: string
+    ): CachedPipeline {
         const existing = this.cache.get(shaderCode);
         if (existing) {
             return existing;
@@ -40,10 +44,12 @@ export class PipelineCache {
 
         const shaderModule = device.createShaderModule({
             code: shaderCode,
+            label: label ? `${label} shader` : undefined
         });
 
         // Use 'auto' layout — WebGPU derives the bind group layout from the shader
         const pipeline = device.createComputePipeline({
+            label,
             layout: 'auto',
             compute: {
                 module: shaderModule,

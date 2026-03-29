@@ -7,6 +7,12 @@ import {
     getUniformPackingLayoutRules,
     type UniformLayoutMode
 } from '../utils/uniform-layout.js';
+import { makeLabel } from '../utils/labels.js';
+
+export interface UniformOptions {
+    /** Optional human-friendly label for debugger/devtools usage. */
+    label?: string;
+}
 
 /**
  * Uniform class for GPU uniform buffers.
@@ -24,6 +30,9 @@ import {
  * ], 'mat4x4f');
  */
 export class Uniform {
+    /** Human-friendly debug label */
+    readonly label: string;
+
     /** The type descriptor for this uniform value */
     readonly type: TypeDescriptor;
 
@@ -42,7 +51,8 @@ export class Uniform {
     /** Device used to upload this uniform (captured on first ensure) */
     private device: GPUDevice | null = null;
 
-    constructor(data: unknown, type: TypeDescriptor) {
+    constructor(data: unknown, type: TypeDescriptor, options?: UniformOptions) {
+        this.label = makeLabel('Uniform', options?.label);
         this.type = type;
         this.value = data;
         this.packedData = this.packOne(data);
@@ -174,6 +184,7 @@ export class Uniform {
 
     private createAndUpload(device: GPUDevice): GPUBuffer {
         const buffer = device.createBuffer({
+            label: this.label,
             size: this.byteLength,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
             mappedAtCreation: true

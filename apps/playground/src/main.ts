@@ -14,10 +14,10 @@ const k = new Kernel(
       `,
     { threads: 4 }
 );
-const node = v.pass(k, { inout: buf, mult });
+const A = v.pass(k, { inout: buf, mult });
+const B = v.pass(k, { inout: buf, mult });
 
-v.run(node);
+v.run([A, B]);
 
-const output = await v.read(node);
-
-console.log(Array.from(output.inout));
+const output = await v.read(buf);
+console.log(Array.from(output));

@@ -341,6 +341,16 @@ describe('Kernel Class', () => {
             expect(kernel.source).toBe('fn main() { }');
         });
 
+        it('assigns a generated label by default', () => {
+            const kernel = new Kernel('fn main() { }');
+            expect(kernel.label).toMatch(/^Kernel#/);
+        });
+
+        it('respects an explicit label', () => {
+            const kernel = new Kernel('fn main() { }', { label: 'blur' });
+            expect(kernel.label).toBe('blur');
+        });
+
         it('defaults to empty outputs', () => {
             const kernel = new Kernel('fn main() { }');
             expect(kernel.outputs).toEqual([]);

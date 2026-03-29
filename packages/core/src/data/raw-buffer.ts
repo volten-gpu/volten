@@ -2,6 +2,12 @@
 // Escape hatch for pre-packed data with literal WGSL type
 
 import { type BufferAccess } from './buffer.js';
+import { makeLabel } from '../utils/labels.js';
+
+export interface RawBufferOptions {
+    /** Optional human-friendly label for debugger/devtools usage. */
+    label?: string;
+}
 
 /**
  * RawBuffer for pre-packed data
@@ -17,6 +23,9 @@ import { type BufferAccess } from './buffer.js';
  * const buf = new RawBuffer(packedData, "ParticleBuffer");
  */
 export class RawBuffer {
+    /** Human-friendly debug label */
+    readonly label: string;
+
     /** Literal WGSL type string */
     readonly wgslType: string;
 
@@ -35,8 +44,10 @@ export class RawBuffer {
     constructor(
         data: ArrayBuffer,
         wgslType: string,
-        access: BufferAccess = 'rw'
+        access: BufferAccess = 'rw',
+        options?: RawBufferOptions
     ) {
+        this.label = makeLabel('RawBuffer', options?.label);
         this.packedData = data;
         this.wgslType = wgslType;
         this.access = access;
@@ -66,6 +77,7 @@ export class RawBuffer {
         }
 
         this.gpuBuffer = device.createBuffer({
+            label: this.label,
             size: this.byteLength,
             usage:
                 GPUBufferUsage.STORAGE |

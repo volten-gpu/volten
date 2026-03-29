@@ -65,12 +65,14 @@ function makeMockHandle(name: string = 'output'): Handle {
     const backingBuffer = makeBuffer([0], 'f32', 'r');
     const fakeNode = {
         _id: Symbol('FakeNode'),
+        _label: 'FakeNode',
         _bindings: { [name]: backingBuffer }
     } as any;
     return {
         _id: Symbol(`Handle:${name}`),
         _node: fakeNode,
-        _name: name
+        _name: name,
+        _label: `FakeNode.${name}`
     };
 }
 
@@ -691,12 +693,13 @@ describe('Node Creation', () => {
 
     describe('createHandle()', () => {
         it('creates a handle with correct properties', () => {
-            const fakeNode = { _id: Symbol('Test') } as any;
+            const fakeNode = { _id: Symbol('Test'), _label: 'TestNode' } as any;
             const handle = createHandle(fakeNode, 'result');
 
             expect(handle._name).toBe('result');
             expect(typeof handle._id).toBe('symbol');
             expect(handle._node).toBe(fakeNode);
+            expect(handle._label).toBe('TestNode.result');
         });
     });
 
@@ -745,12 +748,32 @@ describe('Node Creation', () => {
             });
 
             expect(typeof node._id).toBe('symbol');
+            expect(node._label).toBe('Node');
             expect(node._kernel).toBe(kernel);
             expect(node._pipeline).toBe(mockPipeline);
             expect(node._bindGroupLayout).toBe(mockLayout);
             expect(node._bounds).toEqual([4, 1, 1]);
             expect(node._dispatch).toEqual([4, 1, 1]);
             expect(node._dependencies).toEqual([]);
+        });
+
+        it('supports explicit node labels', () => {
+            const kernel = new Kernel('fn main() { }');
+
+            const node = createNode({
+                kernel,
+                pipeline: mockPipeline,
+                bindGroupLayout: mockLayout,
+                bindingEntries: [],
+                bounds: [1, 1, 1],
+                dispatch: [1, 1, 1],
+                bindings: {},
+                shaderCode: 'test',
+                dependencies: [],
+                label: 'blur-pass'
+            });
+
+            expect(node._label).toBe('blur-pass');
         });
 
         it('tracks dependencies from Handle inputs', () => {
@@ -1026,6 +1049,47 @@ fn main(gid: vec3u) {
         expect(node._shaderCode).toContain('@group(0) @binding(0)');
         expect(node._shaderCode).toContain('@group(0) @binding(1)');
         expect(node._shaderCode).toContain('@compute');
+    });
+
+    it('assigns generated labels to kernels and pass nodes', () => {
+        const v = createMockVoltenContext();
+        const input = makeBuffer([1, 2, 3, 4], 'f32', 'r');
+
+        const kernel = new Kernel('fn main(gid: vec3u) { }');
+        const node = v.pass(kernel, { input });
+
+        expect(kernel.label).toMatch(/^Kernel#/);
+        expect(node._label.startsWith(`${kernel.label}::pass#`)).toBe(true);
+    });
+
+    it('respects explicit labels for buffers, kernels, uniforms, and nodes', () => {
+        const v = createMockVoltenContext();
+        const input = new Buffer([1, 2, 3, 4], 'f32', 'r', {
+            label: 'input-buffer'
+        });
+        const output = new Buffer([0, 0, 0, 0], 'f32', 'rw', {
+            label: 'output-buffer'
+        });
+        const multiplier = new Uniform(2.0, 'f32', {
+            label: 'multiplier-uniform'
+        });
+        const kernel = new Kernel('fn main(gid: vec3u) { }', {
+            label: 'scale-kernel',
+            threads: 'input'
+        });
+
+        const node = v.pass(
+            kernel,
+            { input, output, multiplier },
+            { label: 'scale-pass' }
+        );
+
+        expect(input.label).toBe('input-buffer');
+        expect(output.label).toBe('output-buffer');
+        expect(multiplier.label).toBe('multiplier-uniform');
+        expect(kernel.label).toBe('scale-kernel');
+        expect(node._label).toBe('scale-pass');
+        expect(node.output._label).toBe('scale-pass.output');
     });
 
     it('output handles are accessible directly on the node', () => {

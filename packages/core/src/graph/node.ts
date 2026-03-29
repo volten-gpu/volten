@@ -17,6 +17,8 @@ export interface Handle {
     readonly _node: Node;
     /** Output name for debugging/identification */
     readonly _name: string;
+    /** Human-friendly debug label */
+    readonly _label: string;
 }
 
 /**
@@ -30,6 +32,7 @@ export function isHandle(value: unknown): value is Handle {
         '_id' in value &&
         '_node' in value &&
         '_name' in value &&
+        '_label' in value &&
         typeof (value as Handle)._id === 'symbol'
     );
 }
@@ -78,7 +81,8 @@ export const RESERVED_NODE_PROPERTIES = [
     '_bounds',
     '_dispatch',
     '_bindings',
-    '_shaderCode'
+    '_shaderCode',
+    '_label'
 ] as const;
 
 /**
@@ -106,6 +110,8 @@ export function validateOutputName(name: string): void {
 export interface NodeBase {
     /** Internal identifier */
     readonly _id: symbol;
+    /** Human-friendly debug label */
+    readonly _label: string;
     /** Dependencies (parent nodes providing inputs to this pass) */
     readonly _dependencies: readonly Node[];
     /** Reference to the kernel this node executes */
@@ -171,7 +177,8 @@ export function createHandle(node: Node, name: string): Handle {
     return {
         _id: Symbol(`Handle:${name}`),
         _node: node,
-        _name: name
+        _name: name,
+        _label: `${node._label}.${name}`
     };
 }
 
@@ -188,6 +195,7 @@ export interface CreateNodeOptions {
     bindings: Record<string, unknown>;
     shaderCode: string;
     dependencies: Node[];
+    label?: string;
 }
 
 /**
@@ -211,12 +219,14 @@ export function createNode(options: CreateNodeOptions): Node {
         dispatch,
         bindings,
         shaderCode,
-        dependencies
+        dependencies,
+        label
     } = options;
 
     // Create the base node object (mutated to add handles below)
     const node: any = {
         _id: Symbol('Node'),
+        _label: label ?? 'Node',
         _dependencies: Object.freeze(dependencies),
         _kernel: kernel,
         _pipeline: pipeline,
