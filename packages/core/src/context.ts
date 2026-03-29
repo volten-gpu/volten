@@ -180,20 +180,24 @@ export class VoltenContext {
             );
         }
 
-        let boundsUniform: Uniform | null = null;
-        if (!kernel.unsafeManualBounds) {
-            boundsUniform = new Uniform([bounds[0], bounds[1], bounds[2], 0], 'vec4u', {
-                label: `${kernel.label} bounds`
-            });
-        }
+        const ownedResources = [];
+        const executionBindings = {
+            ...bindings
+        };
 
-        const executionBindings = boundsUniform
-            ? {
-                  ...bindings,
-                  [VOLTEN_INTERNAL_BOUNDS_NAME]: boundsUniform
-              }
-            : bindings;
-        const ownedResources = boundsUniform ? [boundsUniform] : [];
+        let boundsUniform: Uniform | null = null;
+
+        if (!kernel.unsafeManualBounds) {
+            boundsUniform = new Uniform(
+                [bounds[0], bounds[1], bounds[2], 0],
+                'vec4u',
+                {
+                    label: `${kernel.label} bounds`
+                }
+            );
+            ownedResources.push(boundsUniform);
+            executionBindings[VOLTEN_INTERNAL_BOUNDS_NAME] = boundsUniform;
+        }
 
         // 3. Generate binding entries (classify & validate)
         const bindingEntries = generateBindings(executionBindings, kernel, {
