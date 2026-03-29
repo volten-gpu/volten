@@ -12,7 +12,7 @@ const k = new Kernel(
           inout[gid.x] = inout[gid.x] * mult;
         }
       `,
-    { threads: 4 }
+    { threads: 4, label: 'Ktest' }
 );
 const A = v.pass(k, { inout: buf, mult });
 const B = v.pass(k, { inout: buf, mult });
