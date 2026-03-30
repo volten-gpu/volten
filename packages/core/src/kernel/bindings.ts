@@ -215,6 +215,9 @@ export function generateBindingWgsl(entries: BindingEntry[]): string {
  * The binding WGSL is prepended to the kernel's assembled source (which already
  * has builtin shorthands expanded and @compute/@workgroup_size injected).
  *
+ * `assembleFullShader` is thus responsible for pass-time composition:
+ * type declarations, binding declarations, optional extension lines.
+ *
  * @param kernel - The kernel definition
  * @param entries - Classified binding entries
  * @returns Complete WGSL shader source ready for pipeline creation
@@ -274,7 +277,11 @@ export function assembleFullShader(
 export function resolveBounds(
     kernel: Kernel,
     bindings: Record<string, unknown>,
-    passThreads?: number | [number] | [number, number] | [number, number, number]
+    passThreads?:
+        | number
+        | [number]
+        | [number, number]
+        | [number, number, number]
 ): [number, number, number] {
     if (passThreads !== undefined) {
         if (typeof passThreads === 'number') {
@@ -350,7 +357,11 @@ export function resolveBounds(
 export function resolveDispatch(
     kernel: Kernel,
     bindings: Record<string, unknown>,
-    passThreads?: number | [number] | [number, number] | [number, number, number]
+    passThreads?:
+        | number
+        | [number]
+        | [number, number]
+        | [number, number, number]
 ): [number, number, number] {
     const bounds = resolveBounds(kernel, bindings, passThreads);
     return threadsToDispatch3D(bounds, kernel.workgroupSize);
