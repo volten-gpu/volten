@@ -31,12 +31,12 @@ export const BUILTIN_SHORTHANDS: Record<
 };
 
 /** Hidden uniform name injected by Volten for guarded dispatch bounds. */
-export const VOLTEN_INTERNAL_BOUNDS_NAME =
-    '_volten_internal_dispatch_bounds_guard_uniform';
+export const VOLTEN_BOUNDS_NAME =
+    '_volten_dispatch_bounds_guard_uniform';
 
-const VOLTEN_INTERNAL_USER_MAIN_NAME =
-    '_volten_internal_user_main_entrypoint_wrapper';
-const VOLTEN_INTERNAL_GID_NAME = '_volten_internal_guard_gid_builtin';
+const VOLTEN_USER_MAIN_NAME =
+    '_volten_user_main_entrypoint_wrapper';
+const VOLTEN_GID_NAME = '_volten_guard_gid_builtin';
 
 /** Regex to find the start of the main function signature. */
 const MAIN_FN_START_REGEX = /fn\s+main\s*\(/;
@@ -57,6 +57,9 @@ interface MainFunctionMatch {
 
 interface FinalizeComputeEntryPointOptions {
     readonly guarded?: boolean;
+    readonly forceWrapper?: boolean;
+    readonly requireGlobalInvocationId?: boolean;
+    readonly entryPointPrelude?: string | ((gidName: string) => string);
 }
 
 /**
@@ -231,7 +234,13 @@ function finalizeComputeEntryPoint(
     }
 
     const decorators = formatComputeDecorators(workgroupSize);
-    if (!options?.guarded) {
+    const needsWrapper =
+        options?.guarded ||
+        options?.forceWrapper ||
+        options?.requireGlobalInvocationId ||
+        options?.entryPointPrelude;
+
+    if (!needsWrapper) {
         return (
             source.slice(0, main.signatureStart) +
             decorators +
@@ -252,11 +261,17 @@ function finalizeComputeEntryPoint(
     const existingGid = parsedParams.find(
         (param) => param.builtin === 'global_invocation_id'
     );
-    const guardGidName = existingGid?.name ?? VOLTEN_INTERNAL_GID_NAME;
+    const guardGidName = existingGid?.name ?? VOLTEN_GID_NAME;
     const entryParams = parsedParams.map((param) => param.original);
-    if (!existingGid) {
+    const needsInjectedGid =
+        !existingGid &&
+        (options?.guarded ||
+            options?.requireGlobalInvocationId ||
+            options?.entryPointPrelude);
+
+    if (needsInjectedGid) {
         entryParams.push(
-            `@builtin(global_invocation_id) ${VOLTEN_INTERNAL_GID_NAME}: vec3<u32>`
+            `@builtin(global_invocation_id) ${VOLTEN_GID_NAME}: vec3<u32>`
         );
     }
 
@@ -272,27 +287,40 @@ function finalizeComputeEntryPoint(
         renamedSource goes from:
             fn main(gid: vec3u) {
         to:
-            fn _volten_internal_user_main_entrypoint_wrapper(gid: vec3u) {
+            fn _volten_user_main_entrypoint_wrapper(gid: vec3u) {
     */
     const renamedSource =
         source.slice(0, main.signatureStart) +
-        `fn ${VOLTEN_INTERNAL_USER_MAIN_NAME}(${helperParams})` +
+        `fn ${VOLTEN_USER_MAIN_NAME}(${helperParams})` +
         source.slice(main.paramsEnd + 1);
 
     const userArgs = parsedParams.map((param) => param.name).join(', ');
 
     // shader part that calls the wrapper function with the
     // provided arguments:
-    // e.g.: callLine = "_volten_internal_user_main_entrypoint_wrapper(gid);"
+    // e.g.: callLine = "_volten_user_main_entrypoint_wrapper(gid);"
     const callLine =
         userArgs.length > 0
-            ? `${VOLTEN_INTERNAL_USER_MAIN_NAME}(${userArgs});`
-            : `${VOLTEN_INTERNAL_USER_MAIN_NAME}();`;
+            ? `${VOLTEN_USER_MAIN_NAME}(${userArgs});`
+            : `${VOLTEN_USER_MAIN_NAME}();`;
 
     const guardedEntryPoint = `${decorators}fn main(${entryParams.join(', ')}) {
-    if (any(${guardGidName} >= ${VOLTEN_INTERNAL_BOUNDS_NAME}.xyz)) {
+${options?.guarded ? `    if (any(${guardGidName} >= ${VOLTEN_BOUNDS_NAME}.xyz)) {
         return;
-    }
+    }` : ''}
+${(() => {
+        const prelude = options?.entryPointPrelude;
+        if (!prelude) {
+            return '';
+        }
+
+        const resolvedPrelude =
+            typeof prelude === 'function' ? prelude(guardGidName) : prelude;
+        return resolvedPrelude
+            .split('\n')
+            .map((line) => `    ${line}`)
+            .join('\n');
+    })()}
     ${callLine}
 }`;
 
@@ -310,10 +338,18 @@ function finalizeComputeEntryPoint(
 export function processShaderSource(
     source: string,
     workgroupSize: [number, number, number] = [64, 1, 1],
-    options?: { unsafeManualBounds?: boolean }
+    options?: {
+        unsafeManualBounds?: boolean;
+        forceWrapper?: boolean;
+        requireGlobalInvocationId?: boolean;
+        entryPointPrelude?: string | ((gidName: string) => string);
+    }
 ): string {
     const expanded = expandBuiltinShorthands(source);
     return finalizeComputeEntryPoint(expanded, workgroupSize, {
-        guarded: !options?.unsafeManualBounds
+        guarded: !options?.unsafeManualBounds,
+        forceWrapper: options?.forceWrapper,
+        requireGlobalInvocationId: options?.requireGlobalInvocationId,
+        entryPointPrelude: options?.entryPointPrelude
     });
 }

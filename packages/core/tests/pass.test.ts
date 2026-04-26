@@ -19,7 +19,7 @@ import {
     resolveDispatch
 } from '../src/kernel/bindings.js';
 import { Kernel } from '../src/kernel/kernel.js';
-import { VOLTEN_INTERNAL_BOUNDS_NAME } from '../src/kernel/builtins.js';
+import { VOLTEN_BOUNDS_NAME } from '../src/kernel/builtins.js';
 import { Buffer } from '../src/data/buffer.js';
 import { RawBuffer } from '../src/data/raw-buffer.js';
 import { Uniform } from '../src/data/uniform.js';
@@ -1241,7 +1241,7 @@ fn main(gid: vec3u) {
             (e) => e.name === 'multiplier'
         );
         const boundsEntry = node._bindingEntries.find(
-            (e) => e.name === VOLTEN_INTERNAL_BOUNDS_NAME
+            (e) => e.name === VOLTEN_BOUNDS_NAME
         );
         expect(uniformEntry).toBeDefined();
         expect(boundsEntry).toBeDefined();
@@ -1251,7 +1251,7 @@ fn main(gid: vec3u) {
         expect(uniformEntry!.wgslType).toBe('f32');
         expect(node._shaderCode).toContain('var<uniform> multiplier: f32;');
         expect(node._shaderCode).toContain(
-            `var<uniform> ${VOLTEN_INTERNAL_BOUNDS_NAME}: vec4u;`
+            `var<uniform> ${VOLTEN_BOUNDS_NAME}: vec4u;`
         );
         expect((node as any).multiplier).toBeUndefined();
     });
@@ -1270,9 +1270,9 @@ fn main(gid: vec3u) {
 
         expect(node._bounds).toEqual([4, 1, 1]);
         expect(node._dispatch).toEqual([1, 1, 1]);
-        expect(node._shaderCode).toContain(VOLTEN_INTERNAL_BOUNDS_NAME);
+        expect(node._shaderCode).toContain(VOLTEN_BOUNDS_NAME);
         expect(node._shaderCode).toContain(
-            '_volten_internal_user_main_entrypoint_wrapper'
+            '_volten_user_main_entrypoint_wrapper'
         );
     });
 
@@ -1291,12 +1291,12 @@ fn main(gid: vec3u) {
 
         expect(
             node._bindingEntries.find(
-                (e) => e.name === VOLTEN_INTERNAL_BOUNDS_NAME
+                (e) => e.name === VOLTEN_BOUNDS_NAME
             )
         ).toBeUndefined();
-        expect(node._shaderCode).not.toContain(VOLTEN_INTERNAL_BOUNDS_NAME);
+        expect(node._shaderCode).not.toContain(VOLTEN_BOUNDS_NAME);
         expect(node._shaderCode).not.toContain(
-            '_volten_internal_user_main_entrypoint_wrapper'
+            '_volten_user_main_entrypoint_wrapper'
         );
     });
 

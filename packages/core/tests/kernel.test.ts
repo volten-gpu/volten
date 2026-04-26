@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest';
 import {
     Kernel,
     BUILTIN_SHORTHANDS,
-    VOLTEN_INTERNAL_BOUNDS_NAME,
+    VOLTEN_BOUNDS_NAME,
     expandParameter,
     expandParameterList,
     expandBuiltinShorthands,
@@ -285,10 +285,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) { }`);
             const result = processShaderSource(source, [128, 1, 1]);
             expect(result).toContain('@compute @workgroup_size(128, 1, 1)');
             expect(result).toContain(
-                `if (any(gid >= ${VOLTEN_INTERNAL_BOUNDS_NAME}.xyz))`
+                `if (any(gid >= ${VOLTEN_BOUNDS_NAME}.xyz))`
             );
             expect(result).toContain(
-                'fn _volten_internal_user_main_entrypoint_wrapper(gid: vec3<u32>)'
+                'fn _volten_user_main_entrypoint_wrapper(gid: vec3<u32>)'
             );
             expect(result).toContain(
                 'fn main(@builtin(global_invocation_id) gid: vec3<u32>)'
@@ -304,10 +304,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) { }`);
                 '@builtin(local_invocation_index) lid: u32'
             );
             expect(result).toContain(
-                '@builtin(global_invocation_id) _volten_internal_guard_gid_builtin: vec3<u32>'
+                '@builtin(global_invocation_id) _volten_guard_gid_builtin: vec3<u32>'
             );
             expect(result).toContain(
-                '_volten_internal_user_main_entrypoint_wrapper(lid);'
+                '_volten_user_main_entrypoint_wrapper(lid);'
             );
         });
 
@@ -322,9 +322,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) { }`);
             expect(result).toContain(
                 'fn main(@builtin(global_invocation_id) gid: vec3<u32>)'
             );
-            expect(result).not.toContain(VOLTEN_INTERNAL_BOUNDS_NAME);
+            expect(result).not.toContain(VOLTEN_BOUNDS_NAME);
             expect(result).not.toContain(
-                '_volten_internal_user_main_entrypoint_wrapper'
+                '_volten_user_main_entrypoint_wrapper'
             );
         });
     });

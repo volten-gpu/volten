@@ -34,6 +34,8 @@ export interface PassOptions {
     threads?: number | [number] | [number, number] | [number, number, number];
     /** Optional human-friendly label for the created node/pass. */
     label?: string;
+    /** Optional shader debugging support for this specific pass. */
+    debug?: boolean | import('./debug/types.js').DebugOptions;
 }
 
 import { Kernel } from './kernel/kernel.js';
@@ -44,7 +46,7 @@ import {
     resolveBounds,
     resolveDispatch
 } from './kernel/bindings.js';
-import { VOLTEN_INTERNAL_BOUNDS_NAME } from './kernel/builtins.js';
+import { VOLTEN_BOUNDS_NAME } from './kernel/builtins.js';
 import {
     createNode,
     getNodeOutputs,
@@ -64,6 +66,14 @@ import {
     type UniformLayoutPreference
 } from './utils/uniform-layout.js';
 import { makeNodeLabel } from './utils/labels.js';
+import {
+    DebugBufferResource,
+    VOLTEN_DEBUG_BUFFER_NAME,
+    decodeDebugBuffer,
+    prepareDebugShader,
+    resolveDebugOptions,
+    type DebugReadResult
+} from './debug/index.js';
 
 /**
  * Valid targets for reading back data to the CPU.
@@ -148,6 +158,8 @@ export class VoltenContext {
         bindings: Record<string, Buffer | RawBuffer | Uniform | Handle> = {},
         options?: PassOptions
     ): Node {
+        const nodeLabel = makeNodeLabel(kernel.label, options?.label);
+
         // 1. Validate kernel type
         if (!(kernel instanceof Kernel)) {
             throw new Error(
@@ -156,15 +168,22 @@ export class VoltenContext {
             );
         }
 
-        if (VOLTEN_INTERNAL_BOUNDS_NAME in bindings) {
+        if (VOLTEN_BOUNDS_NAME in bindings) {
             throw new Error(
-                `Volten Error: Binding name "${VOLTEN_INTERNAL_BOUNDS_NAME}" is reserved for internal use.`
+                `Volten Error: Binding name "${VOLTEN_BOUNDS_NAME}" is reserved for internal use.`
+            );
+        }
+
+        if (VOLTEN_DEBUG_BUFFER_NAME in bindings) {
+            throw new Error(
+                `Volten Error: Binding name "${VOLTEN_DEBUG_BUFFER_NAME}" is reserved for internal use.`
             );
         }
 
         // 2. Resolve logical bounds and physical dispatch dimensions
         const bounds = resolveBounds(kernel, bindings, options?.threads);
         const dispatch = resolveDispatch(kernel, bindings, options?.threads);
+        const debugOptions = resolveDebugOptions(options?.debug);
 
         if (
             !kernel.unsafeManualBounds &&
@@ -185,18 +204,33 @@ export class VoltenContext {
             ...bindings
         };
 
-        let boundsUniform: Uniform | null = null;
-
         if (!kernel.unsafeManualBounds) {
-            boundsUniform = new Uniform(
+            const boundsUniform = new Uniform(
                 [bounds[0], bounds[1], bounds[2], 0],
                 'vec4u',
                 {
-                    label: `${kernel.label} bounds`
+                    label: `${nodeLabel} bounds`
                 }
             );
             ownedResources.push(boundsUniform);
-            executionBindings[VOLTEN_INTERNAL_BOUNDS_NAME] = boundsUniform;
+            executionBindings[VOLTEN_BOUNDS_NAME] = boundsUniform;
+        }
+
+        let debugState: {
+            readonly resource: DebugBufferResource;
+            readonly messages: readonly string[];
+        } | null = null;
+        let debugShaderCode: ReturnType<typeof prepareDebugShader> | null = null;
+
+        if (debugOptions) {
+            debugShaderCode = prepareDebugShader(kernel, debugOptions.capacityWords);
+            const resource = new DebugBufferResource(debugOptions, `${nodeLabel} debug`);
+            ownedResources.push(resource);
+            executionBindings[VOLTEN_DEBUG_BUFFER_NAME] = resource.buffer;
+            debugState = {
+                resource,
+                messages: debugShaderCode.messages
+            };
         }
 
         // 3. Generate binding entries (classify & validate)
@@ -206,7 +240,11 @@ export class VoltenContext {
 
         // 4. Assemble full shader source
         const shaderCode = assembleFullShader(kernel, bindingEntries, {
-            uniformLayoutMode: this._uniformLayoutMode
+            uniformLayoutMode: this._uniformLayoutMode,
+            kernelSource: debugShaderCode?.kernelSource,
+            additionalSections: debugShaderCode
+                ? [debugShaderCode.supportWgsl]
+                : undefined
         });
 
         // 5. Get or create pipeline
@@ -238,7 +276,8 @@ export class VoltenContext {
             bindings,
             shaderCode,
             dependencies,
-            label: makeNodeLabel(kernel.label, options?.label)
+            label: nodeLabel,
+            debug: debugState
         });
     }
 
@@ -332,6 +371,10 @@ export class VoltenContext {
         const nodesInCurrentPass = new Set<Node>();
 
         for (const node of plan.sorted) {
+            if (node._debug) {
+                node._debug.resource.reset(this.device);
+            }
+
             // Ensure all Buffer/RawBuffer bindings are uploaded
             for (const entry of node._bindingEntries) {
                 if (
@@ -457,6 +500,78 @@ export class VoltenContext {
         }
     }
 
+    private async _readConcreteBuffers(
+        concretes: readonly (Buffer | RawBuffer)[]
+    ): Promise<Map<Buffer | RawBuffer, ArrayBufferView | ArrayBuffer>> {
+        const uniqueBuffers = new Map<
+            Buffer | RawBuffer,
+            { staging: GPUBuffer; size: number }
+        >();
+
+        for (const concrete of concretes) {
+            uniqueBuffers.set(concrete, {
+                staging: null!,
+                size: concrete.byteLength
+            });
+        }
+
+        if (uniqueBuffers.size === 0) {
+            return new Map();
+        }
+
+        const encoder = this.device.createCommandEncoder({
+            label: this.label
+                ? `${this.label} readback encoder`
+                : 'Volten readback encoder'
+        });
+
+        for (const [concrete, info] of uniqueBuffers.entries()) {
+            const gpuBuffer = concrete.ensure(this.device);
+            const staging = this.device.createBuffer({
+                label: `${concrete.label} readback`,
+                size: info.size,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
+            });
+            info.staging = staging;
+            encoder.copyBufferToBuffer(gpuBuffer, 0, staging, 0, info.size);
+        }
+
+        this.device.queue.submit([encoder.finish()]);
+
+        const materializedBuffers = new Map<
+            Buffer | RawBuffer,
+            ArrayBufferView | ArrayBuffer
+        >();
+
+        for (const [concrete, info] of uniqueBuffers.entries()) {
+            await info.staging.mapAsync(GPUMapMode.READ);
+            const mappedRange = info.staging.getMappedRange().slice(0);
+
+            let TypedArrayConstructor:
+                | Float32ArrayConstructor
+                | Uint32ArrayConstructor
+                | Int32ArrayConstructor
+                | undefined;
+            if (concrete instanceof Buffer) {
+                TypedArrayConstructor = getTypedArrayForType(concrete.type);
+            }
+
+            let data: ArrayBufferView | ArrayBuffer;
+            if (TypedArrayConstructor) {
+                data = new TypedArrayConstructor(mappedRange);
+            } else {
+                data = mappedRange;
+            }
+
+            info.staging.unmap();
+            info.staging.destroy();
+
+            materializedBuffers.set(concrete, data);
+        }
+
+        return materializedBuffers;
+    }
+
     /**
      * Read back targets (Nodes, Buffers, Handles) from GPU to CPU.
      *
@@ -531,58 +646,9 @@ export class VoltenContext {
         if (uniqueBuffers.size === 0) {
             return isArrayTarget ? [] : undefined;
         }
-
-        const encoder = this.device.createCommandEncoder({
-            label: this.label
-                ? `${this.label} readback encoder`
-                : 'Volten readback encoder'
-        });
-
-        // 2. Create staging buffers and issue copies
-        for (const [concrete, info] of uniqueBuffers.entries()) {
-            const gpuBuffer = concrete.ensure(this.device);
-            const staging = this.device.createBuffer({
-                label: `${concrete.label} readback`,
-                size: info.size,
-                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
-            });
-            info.staging = staging;
-            encoder.copyBufferToBuffer(gpuBuffer, 0, staging, 0, info.size);
-        }
-
-        this.device.queue.submit([encoder.finish()]);
-
-        // 3. Map memory and extract TypedArrays
-        const materializedBuffers = new Map<
-            Buffer | RawBuffer,
-            ArrayBufferView | ArrayBuffer
-        >();
-
-        for (const [concrete, info] of uniqueBuffers.entries()) {
-            await info.staging.mapAsync(GPUMapMode.READ);
-            const mappedRange = info.staging.getMappedRange().slice(0); // Clone the data securely
-
-            let TypedArrayConstructor:
-                | Float32ArrayConstructor
-                | Uint32ArrayConstructor
-                | Int32ArrayConstructor
-                | undefined = Float32Array;
-            if (concrete instanceof Buffer) {
-                TypedArrayConstructor = getTypedArrayForType(concrete.type);
-            }
-
-            let data: ArrayBufferView | ArrayBuffer;
-            if (TypedArrayConstructor) {
-                data = new TypedArrayConstructor(mappedRange);
-            } else {
-                data = mappedRange; // ArrayBuffer for structs or raw data
-            }
-
-            info.staging.unmap();
-            info.staging.destroy();
-
-            materializedBuffers.set(concrete, data);
-        }
+        const materializedBuffers = await this._readConcreteBuffers(
+            Array.from(uniqueBuffers.keys())
+        );
 
         // 4. Reconstruct results
         const results = targetPlans.map((plan) => {
@@ -599,5 +665,28 @@ export class VoltenContext {
         });
 
         return isArrayTarget ? results : results[0];
+    }
+
+    async readDebug(node: Node): Promise<DebugReadResult> {
+        if (!node._debug) {
+            throw new Error(
+                'Volten Error: v.readDebug() called on a node without debug support.\n' +
+                    '  Hint: Create the node with v.pass(kernel, bindings, { debug: true }).'
+            );
+        }
+
+        const readback = await this._readConcreteBuffers([node._debug.resource.buffer]);
+        const raw = readback.get(node._debug.resource.buffer);
+        if (!(raw instanceof ArrayBuffer)) {
+            throw new Error(
+                'Volten Error: Internal debug readback expected an ArrayBuffer payload.'
+            );
+        }
+
+        return decodeDebugBuffer(
+            raw,
+            node._debug.messages,
+            node._debug.resource.bufferSize
+        );
     }
 }

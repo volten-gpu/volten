@@ -225,7 +225,11 @@ export function generateBindingWgsl(entries: BindingEntry[]): string {
 export function assembleFullShader(
     kernel: Kernel,
     entries: BindingEntry[],
-    options?: { uniformLayoutMode?: UniformLayoutMode }
+    options?: {
+        uniformLayoutMode?: UniformLayoutMode;
+        kernelSource?: string;
+        additionalSections?: string[];
+    }
 ): string {
     const uniformLayoutMode = options?.uniformLayoutMode ?? 'classic';
     const bindingTypeInfo: BindingTypeInfo[] = entries.map((entry) => ({
@@ -241,9 +245,15 @@ export function assembleFullShader(
     const requiresUniformStandardLayout =
         uniformLayoutMode === 'standard' &&
         entries.some((entry) => entry.wgslAddressSpace === 'uniform');
-    const kernelSource = kernel.assembledSource;
+    const kernelSource = options?.kernelSource ?? kernel.assembledSource;
+    const additionalSections = options?.additionalSections ?? [];
 
-    if (!bindingWgsl && !typeDeclarations && !requiresUniformStandardLayout) {
+    if (
+        !bindingWgsl &&
+        !typeDeclarations &&
+        !requiresUniformStandardLayout &&
+        additionalSections.length === 0
+    ) {
         return kernelSource;
     }
 
@@ -254,6 +264,7 @@ export function assembleFullShader(
     if (typeDeclarations) {
         sections.push(typeDeclarations);
     }
+    sections.push(...additionalSections.filter(Boolean));
     if (bindingWgsl) {
         sections.push(bindingWgsl);
     }

@@ -9,15 +9,24 @@ const mult = new Uniform(10, 'f32');
 const k = new Kernel(
     `
         fn main(gid: vec3u) {
+          if (gid.x == 3) {
+            enableDebug();
+            debugF32("test message", inout[gid.x] * mult);
+          }
+
           inout[gid.x] = inout[gid.x] * mult;
         }
       `,
     { threads: 4, label: 'Ktest' }
 );
-const A = v.pass(k, { inout: buf, mult });
-const B = v.pass(k, { inout: buf, mult });
+const A = v.pass(k, { inout: buf, mult }, { debug: {} });
+// const B = v.pass(k, { inout: buf, mult });
 
-v.run([A, B]);
+// v.run([A, B]);
+v.run(A);
 
 const output = await v.read(buf);
 console.log(Array.from(output));
+
+let debugRes = await v.readDebug(A);
+console.log(debugRes.logs);

@@ -1,0 +1,715 @@
+import { processShaderSource } from '../kernel/builtins.js';
+import type { Kernel } from '../kernel/kernel.js';
+import {
+    DEBUG_KIND_TAGS,
+    DEBUG_KIND_WORD_COUNTS,
+    DEBUG_RECORD_HEADER_WORDS,
+    type DebugValueKind
+} from './types.js';
+import { VOLTEN_DEBUG_BUFFER_NAME } from './resource.js';
+
+const VOLTEN_DEBUG_ENABLED_NAME = '_volten_debug_enabled';
+const VOLTEN_DEBUG_GID_NAME = '_volten_debug_gid';
+const VOLTEN_DEBUG_BEGIN_FN =
+    '_volten_debug_begin_invocation';
+const VOLTEN_DEBUG_RESERVE_FN = '_volten_debug_reserve';
+const VOLTEN_DEBUG_WRITE_HEADER_FN =
+    '_volten_debug_write_header';
+const VOLTEN_DEBUG_OVERFLOW_SENTINEL = '0xffffffffu';
+
+type SupportedDebugFunctionName =
+    | 'debugF32'
+    | 'debugU32'
+    | 'debugI32'
+    | 'debugVec2'
+    | 'debugVec2f'
+    | 'debugVec3'
+    | 'debugVec3f'
+    | 'debugVec4'
+    | 'debugVec4f'
+    | 'debugMat4'
+    | 'debugMat4x4f';
+
+interface DebugFunctionSpec {
+    readonly kind: DebugValueKind;
+    readonly valueType: string;
+}
+
+const DEBUG_FUNCTIONS: Record<SupportedDebugFunctionName, DebugFunctionSpec> = {
+    debugF32: {
+        kind: 'f32',
+        valueType: 'f32'
+    },
+    debugU32: {
+        kind: 'u32',
+        valueType: 'u32'
+    },
+    debugI32: {
+        kind: 'i32',
+        valueType: 'i32'
+    },
+    debugVec2: {
+        kind: 'vec2f',
+        valueType: 'vec2<f32>'
+    },
+    debugVec2f: {
+        kind: 'vec2f',
+        valueType: 'vec2<f32>'
+    },
+    debugVec3: {
+        kind: 'vec3f',
+        valueType: 'vec3<f32>'
+    },
+    debugVec3f: {
+        kind: 'vec3f',
+        valueType: 'vec3<f32>'
+    },
+    debugVec4: {
+        kind: 'vec4f',
+        valueType: 'vec4<f32>'
+    },
+    debugVec4f: {
+        kind: 'vec4f',
+        valueType: 'vec4<f32>'
+    },
+    debugMat4: {
+        kind: 'mat4x4f',
+        valueType: 'mat4x4<f32>'
+    },
+    debugMat4x4f: {
+        kind: 'mat4x4f',
+        valueType: 'mat4x4<f32>'
+    }
+};
+
+const DEBUG_FUNCTION_NAMES = new Set<string>(Object.keys(DEBUG_FUNCTIONS));
+
+interface ScanResult {
+    readonly replacement: string;
+    readonly endIndex: number;
+}
+
+interface ParsedCall {
+    readonly endIndex: number;
+}
+
+export interface PreparedDebugShader {
+    readonly kernelSource: string;
+    readonly supportWgsl: string;
+    readonly messages: readonly string[];
+}
+
+function isIdentifierStart(char: string): boolean {
+    return /[A-Za-z_]/.test(char);
+}
+
+function isIdentifierPart(char: string): boolean {
+    return /[A-Za-z0-9_]/.test(char);
+}
+
+function skipWhitespace(source: string, index: number): number {
+    let current = index;
+    while (current < source.length && /\s/.test(source[current])) {
+        current++;
+    }
+    return current;
+}
+
+function parseCallSpan(
+    source: string,
+    openParenIndex: number
+): { args: string; endIndex: number } {
+    let depth = 1;
+    let index = openParenIndex + 1;
+    let quote: '"' | "'" | null = null;
+    let lineComment = false;
+    let blockComment = false;
+
+    while (index < source.length) {
+        const char = source[index];
+        const next = source[index + 1];
+
+        if (lineComment) {
+            if (char === '\n') {
+                lineComment = false;
+            }
+            index++;
+            continue;
+        }
+
+        if (blockComment) {
+            if (char === '*' && next === '/') {
+                blockComment = false;
+                index += 2;
+                continue;
+            }
+            index++;
+            continue;
+        }
+
+        if (quote) {
+            if (char === '\\') {
+                index += 2;
+                continue;
+            }
+            if (char === quote) {
+                quote = null;
+            }
+            index++;
+            continue;
+        }
+
+        if (char === '/' && next === '/') {
+            lineComment = true;
+            index += 2;
+            continue;
+        }
+
+        if (char === '/' && next === '*') {
+            blockComment = true;
+            index += 2;
+            continue;
+        }
+
+        if (char === '"' || char === "'") {
+            quote = char as '"' | "'";
+            index++;
+            continue;
+        }
+
+        if (char === '(') {
+            depth++;
+            index++;
+            continue;
+        }
+
+        if (char === ')') {
+            depth--;
+            if (depth === 0) {
+                return {
+                    args: source.slice(openParenIndex + 1, index),
+                    endIndex: index + 1
+                };
+            }
+            index++;
+            continue;
+        }
+
+        index++;
+    }
+
+    throw new Error(
+        'Volten Error: Unterminated debug call while parsing shader source.'
+    );
+}
+
+function splitTopLevelArgs(argsSource: string): string[] {
+    const args: string[] = [];
+    let start = 0;
+    let depth = 0;
+    let index = 0;
+    let quote: '"' | "'" | null = null;
+    let lineComment = false;
+    let blockComment = false;
+
+    while (index < argsSource.length) {
+        const char = argsSource[index];
+        const next = argsSource[index + 1];
+
+        if (lineComment) {
+            if (char === '\n') {
+                lineComment = false;
+            }
+            index++;
+            continue;
+        }
+
+        if (blockComment) {
+            if (char === '*' && next === '/') {
+                blockComment = false;
+                index += 2;
+                continue;
+            }
+            index++;
+            continue;
+        }
+
+        if (quote) {
+            if (char === '\\') {
+                index += 2;
+                continue;
+            }
+            if (char === quote) {
+                quote = null;
+            }
+            index++;
+            continue;
+        }
+
+        if (char === '/' && next === '/') {
+            lineComment = true;
+            index += 2;
+            continue;
+        }
+
+        if (char === '/' && next === '*') {
+            blockComment = true;
+            index += 2;
+            continue;
+        }
+
+        if (char === '"' || char === "'") {
+            quote = char as '"' | "'";
+            index++;
+            continue;
+        }
+
+        if (char === '(' || char === '[' || char === '{') {
+            depth++;
+            index++;
+            continue;
+        }
+
+        if (char === ')' || char === ']' || char === '}') {
+            depth--;
+            index++;
+            continue;
+        }
+
+        if (char === ',' && depth === 0) {
+            args.push(argsSource.slice(start, index).trim());
+            start = index + 1;
+        }
+
+        index++;
+    }
+
+    const last = argsSource.slice(start).trim();
+    if (last) {
+        args.push(last);
+    }
+
+    return args;
+}
+
+function decodeStringLiteral(literal: string): string {
+    const trimmed = literal.trim();
+    if (
+        trimmed.length < 2 ||
+        trimmed[0] !== '"' ||
+        trimmed[trimmed.length - 1] !== '"'
+    ) {
+        throw new Error(
+            `Volten Error: Debug messages must use double-quoted string literals. Received: ${trimmed}`
+        );
+    }
+
+    let result = '';
+    for (let i = 1; i < trimmed.length - 1; i++) {
+        const char = trimmed[i];
+        if (char !== '\\') {
+            result += char;
+            continue;
+        }
+
+        const next = trimmed[++i];
+        switch (next) {
+            case '"':
+                result += '"';
+                break;
+            case '\\':
+                result += '\\';
+                break;
+            case 'n':
+                result += '\n';
+                break;
+            case 'r':
+                result += '\r';
+                break;
+            case 't':
+                result += '\t';
+                break;
+            case '0':
+                result += '\0';
+                break;
+            default:
+                throw new Error(
+                    `Volten Error: Unsupported escape sequence "\\${next}" in debug message.`
+                );
+        }
+    }
+    return result;
+}
+
+function createMessageRegistry() {
+    const messages: string[] = [];
+    const ids = new Map<string, number>();
+
+    return {
+        messages,
+        getId(message: string): number {
+            const existing = ids.get(message);
+            if (existing !== undefined) {
+                return existing;
+            }
+
+            const nextId = messages.length + 1;
+            ids.set(message, nextId);
+            messages.push(message);
+            return nextId;
+        }
+    };
+}
+
+function validateEnableDebugCall(
+    source: string,
+    callName: string,
+    callStart: number,
+    openParenIndex: number
+): ParsedCall {
+    const { args, endIndex } = parseCallSpan(source, openParenIndex);
+    if (args.trim().length > 0) {
+        throw new Error(
+            `Volten Error: ${callName}() does not accept any arguments.`
+        );
+    }
+
+    return {
+        endIndex
+    };
+}
+
+function rewriteTypedDebugCall(
+    source: string,
+    spec: DebugFunctionSpec,
+    callName: string,
+    callStart: number,
+    openParenIndex: number,
+    messages: ReturnType<typeof createMessageRegistry>
+): ScanResult {
+    const { args, endIndex } = parseCallSpan(source, openParenIndex);
+    const parsedArgs = splitTopLevelArgs(args);
+
+    let messageId = 0;
+    let valueExpression: string | undefined;
+
+    if (parsedArgs.length === 1) {
+        valueExpression = parsedArgs[0];
+    } else if (parsedArgs.length === 2) {
+        messageId = messages.getId(decodeStringLiteral(parsedArgs[0]));
+        valueExpression = parsedArgs[1];
+    } else {
+        throw new Error(
+            `Volten Error: ${callName}() expects either (value) or ("message", value).`
+        );
+    }
+
+    if (!valueExpression || valueExpression.trim().length === 0) {
+        throw new Error(`Volten Error: ${callName}() requires a value to log.`);
+    }
+
+    return {
+        replacement: `${callName}(${messageId}u, ${valueExpression.trim()})`,
+        endIndex
+    };
+}
+
+function rewriteDebugSource(source: string): {
+    source: string;
+    messages: readonly string[];
+} {
+    const registry = createMessageRegistry();
+    let index = 0;
+    let output = '';
+
+    while (index < source.length) {
+        const char = source[index];
+        const next = source[index + 1];
+
+        if (char === '/' && next === '/') {
+            const end = source.indexOf('\n', index);
+            const sliceEnd = end === -1 ? source.length : end;
+            output += source.slice(index, sliceEnd);
+            index = sliceEnd;
+            continue;
+        }
+
+        if (char === '/' && next === '*') {
+            const end = source.indexOf('*/', index + 2);
+            const sliceEnd = end === -1 ? source.length : end + 2;
+            output += source.slice(index, sliceEnd);
+            index = sliceEnd;
+            continue;
+        }
+
+        // looks for identifier starts, like variable names,
+        // or "fn"
+        if (!isIdentifierStart(char)) {
+            output += char;
+            index++;
+            continue;
+        }
+
+        // and tries to find the start and end point of
+        // the identifier. Ideally we're looking for
+        // "debugF32" or similar
+        let end = index + 1;
+        while (end < source.length && isIdentifierPart(source[end])) {
+            end++;
+        }
+
+        const identifier = source.slice(index, end);
+        const afterIdentifier = skipWhitespace(source, end);
+        const isCall = source[afterIdentifier] === '(';
+
+        if (!isCall) {
+            output += identifier;
+            index = end;
+            continue;
+        }
+
+        if (identifier === 'debug') {
+            throw new Error(
+                'Volten Error: Generic debug(...) is not supported in v0. Use typed helpers like debugF32(), debugVec3(), or debugMat4().'
+            );
+        }
+
+        if (identifier === 'enableDebug') {
+            const parsed = validateEnableDebugCall(
+                source,
+                identifier,
+                index,
+                afterIdentifier
+            );
+            output += source.slice(index, parsed.endIndex);
+            index = parsed.endIndex;
+            continue;
+        }
+
+        if (DEBUG_FUNCTION_NAMES.has(identifier)) {
+            const rewritten = rewriteTypedDebugCall(
+                source,
+                DEBUG_FUNCTIONS[identifier as SupportedDebugFunctionName],
+                identifier,
+                index,
+                afterIdentifier,
+                registry
+            );
+            output += rewritten.replacement;
+            index = rewritten.endIndex;
+            continue;
+        }
+
+        output += identifier;
+        index = end;
+    }
+
+    return {
+        source: output,
+        messages: registry.messages
+    };
+}
+
+function createDebugFunctionHelperWgsl(
+    name: SupportedDebugFunctionName,
+    spec: DebugFunctionSpec
+): string {
+    const kindTag = DEBUG_KIND_TAGS[spec.kind];
+    const payloadWords = DEBUG_KIND_WORD_COUNTS[spec.kind];
+
+    switch (spec.kind) {
+        case 'f32':
+            return `fn ${name}(messageId: u32, value: f32) {
+    if (!${VOLTEN_DEBUG_ENABLED_NAME}) {
+        return;
+    }
+
+    let start = ${VOLTEN_DEBUG_RESERVE_FN}(${payloadWords}u);
+    if (start == ${VOLTEN_DEBUG_OVERFLOW_SENTINEL}) {
+        return;
+    }
+
+    ${VOLTEN_DEBUG_WRITE_HEADER_FN}(start, ${kindTag}u, messageId, ${payloadWords}u);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u] = bitcast<u32>(value);
+}`;
+        case 'u32':
+            return `fn ${name}(messageId: u32, value: u32) {
+    if (!${VOLTEN_DEBUG_ENABLED_NAME}) {
+        return;
+    }
+
+    let start = ${VOLTEN_DEBUG_RESERVE_FN}(${payloadWords}u);
+    if (start == ${VOLTEN_DEBUG_OVERFLOW_SENTINEL}) {
+        return;
+    }
+
+    ${VOLTEN_DEBUG_WRITE_HEADER_FN}(start, ${kindTag}u, messageId, ${payloadWords}u);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u] = value;
+}`;
+        case 'i32':
+            return `fn ${name}(messageId: u32, value: i32) {
+    if (!${VOLTEN_DEBUG_ENABLED_NAME}) {
+        return;
+    }
+
+    let start = ${VOLTEN_DEBUG_RESERVE_FN}(${payloadWords}u);
+    if (start == ${VOLTEN_DEBUG_OVERFLOW_SENTINEL}) {
+        return;
+    }
+
+    ${VOLTEN_DEBUG_WRITE_HEADER_FN}(start, ${kindTag}u, messageId, ${payloadWords}u);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u] = bitcast<u32>(value);
+}`;
+        case 'vec2f':
+            return `fn ${name}(messageId: u32, value: vec2<f32>) {
+    if (!${VOLTEN_DEBUG_ENABLED_NAME}) {
+        return;
+    }
+
+    let start = ${VOLTEN_DEBUG_RESERVE_FN}(${payloadWords}u);
+    if (start == ${VOLTEN_DEBUG_OVERFLOW_SENTINEL}) {
+        return;
+    }
+
+    ${VOLTEN_DEBUG_WRITE_HEADER_FN}(start, ${kindTag}u, messageId, ${payloadWords}u);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 0u] = bitcast<u32>(value.x);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 1u] = bitcast<u32>(value.y);
+}`;
+        case 'vec3f':
+            return `fn ${name}(messageId: u32, value: vec3<f32>) {
+    if (!${VOLTEN_DEBUG_ENABLED_NAME}) {
+        return;
+    }
+
+    let start = ${VOLTEN_DEBUG_RESERVE_FN}(${payloadWords}u);
+    if (start == ${VOLTEN_DEBUG_OVERFLOW_SENTINEL}) {
+        return;
+    }
+
+    ${VOLTEN_DEBUG_WRITE_HEADER_FN}(start, ${kindTag}u, messageId, ${payloadWords}u);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 0u] = bitcast<u32>(value.x);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 1u] = bitcast<u32>(value.y);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 2u] = bitcast<u32>(value.z);
+}`;
+        case 'vec4f':
+            return `fn ${name}(messageId: u32, value: vec4<f32>) {
+    if (!${VOLTEN_DEBUG_ENABLED_NAME}) {
+        return;
+    }
+
+    let start = ${VOLTEN_DEBUG_RESERVE_FN}(${payloadWords}u);
+    if (start == ${VOLTEN_DEBUG_OVERFLOW_SENTINEL}) {
+        return;
+    }
+
+    ${VOLTEN_DEBUG_WRITE_HEADER_FN}(start, ${kindTag}u, messageId, ${payloadWords}u);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 0u] = bitcast<u32>(value.x);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 1u] = bitcast<u32>(value.y);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 2u] = bitcast<u32>(value.z);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 3u] = bitcast<u32>(value.w);
+}`;
+        case 'mat4x4f':
+            return `fn ${name}(messageId: u32, value: mat4x4<f32>) {
+    if (!${VOLTEN_DEBUG_ENABLED_NAME}) {
+        return;
+    }
+
+    let start = ${VOLTEN_DEBUG_RESERVE_FN}(${payloadWords}u);
+    if (start == ${VOLTEN_DEBUG_OVERFLOW_SENTINEL}) {
+        return;
+    }
+
+    ${VOLTEN_DEBUG_WRITE_HEADER_FN}(start, ${kindTag}u, messageId, ${payloadWords}u);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 0u] = bitcast<u32>(value[0][0]);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 1u] = bitcast<u32>(value[0][1]);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 2u] = bitcast<u32>(value[0][2]);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 3u] = bitcast<u32>(value[0][3]);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 4u] = bitcast<u32>(value[1][0]);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 5u] = bitcast<u32>(value[1][1]);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 6u] = bitcast<u32>(value[1][2]);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 7u] = bitcast<u32>(value[1][3]);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 8u] = bitcast<u32>(value[2][0]);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 9u] = bitcast<u32>(value[2][1]);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 10u] = bitcast<u32>(value[2][2]);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 11u] = bitcast<u32>(value[2][3]);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 12u] = bitcast<u32>(value[3][0]);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 13u] = bitcast<u32>(value[3][1]);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 14u] = bitcast<u32>(value[3][2]);
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + ${DEBUG_RECORD_HEADER_WORDS}u + 15u] = bitcast<u32>(value[3][3]);
+}`;
+    }
+}
+
+function createDebugSupportWgsl(capacityWords: number): string {
+    const helpers = Object.entries(DEBUG_FUNCTIONS)
+        .map(([name, spec]) =>
+            createDebugFunctionHelperWgsl(
+                name as SupportedDebugFunctionName,
+                spec
+            )
+        )
+        .join('\n\n');
+
+    return `struct _volten_debug_storage_buffer {
+    cursor: atomic<u32>,
+    dropped: atomic<u32>,
+    data: array<u32>,
+};
+
+var<private> ${VOLTEN_DEBUG_ENABLED_NAME}: bool = false;
+var<private> ${VOLTEN_DEBUG_GID_NAME}: vec3<u32> = vec3<u32>(0u);
+
+fn ${VOLTEN_DEBUG_BEGIN_FN}(gid: vec3<u32>) {
+    ${VOLTEN_DEBUG_ENABLED_NAME} = false;
+    ${VOLTEN_DEBUG_GID_NAME} = gid;
+}
+
+fn enableDebug() {
+    ${VOLTEN_DEBUG_ENABLED_NAME} = true;
+}
+
+fn ${VOLTEN_DEBUG_RESERVE_FN}(payloadWords: u32) -> u32 {
+    let totalWords = ${DEBUG_RECORD_HEADER_WORDS}u + payloadWords;
+    let start = atomicAdd(&${VOLTEN_DEBUG_BUFFER_NAME}.cursor, totalWords);
+    if (start + totalWords > ${capacityWords}u) {
+        atomicAdd(&${VOLTEN_DEBUG_BUFFER_NAME}.dropped, 1u);
+        return ${VOLTEN_DEBUG_OVERFLOW_SENTINEL};
+    }
+    return start;
+}
+
+fn ${VOLTEN_DEBUG_WRITE_HEADER_FN}(start: u32, kind: u32, messageId: u32, payloadWords: u32) {
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + 0u] = kind;
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + 1u] = messageId;
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + 2u] = ${VOLTEN_DEBUG_GID_NAME}.x;
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + 3u] = ${VOLTEN_DEBUG_GID_NAME}.y;
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + 4u] = ${VOLTEN_DEBUG_GID_NAME}.z;
+    ${VOLTEN_DEBUG_BUFFER_NAME}.data[start + 5u] = payloadWords;
+}
+
+${helpers}`;
+}
+
+export function prepareDebugShader(
+    kernel: Kernel,
+    capacityWords: number
+): PreparedDebugShader {
+    const rewritten = rewriteDebugSource(kernel.source);
+    const kernelSource = processShaderSource(
+        rewritten.source,
+        kernel.workgroupSize,
+        {
+            unsafeManualBounds: kernel.unsafeManualBounds,
+            forceWrapper: true,
+            requireGlobalInvocationId: true,
+            entryPointPrelude: (gidName) =>
+                `${VOLTEN_DEBUG_BEGIN_FN}(${gidName});`
+        }
+    );
+
+    return {
+        kernelSource,
+        supportWgsl: createDebugSupportWgsl(capacityWords),
+        messages: rewritten.messages
+    };
+}
