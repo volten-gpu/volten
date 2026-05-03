@@ -10,11 +10,9 @@ import { VOLTEN_DEBUG_BUFFER_NAME } from './resource.js';
 
 const VOLTEN_DEBUG_ENABLED_NAME = '_volten_debug_enabled';
 const VOLTEN_DEBUG_GID_NAME = '_volten_debug_gid';
-const VOLTEN_DEBUG_BEGIN_FN =
-    '_volten_debug_begin_invocation';
+const VOLTEN_DEBUG_BEGIN_FN = '_volten_debug_begin_invocation';
 const VOLTEN_DEBUG_RESERVE_FN = '_volten_debug_reserve';
-const VOLTEN_DEBUG_WRITE_HEADER_FN =
-    '_volten_debug_write_header';
+const VOLTEN_DEBUG_WRITE_HEADER_FN = '_volten_debug_write_header';
 const VOLTEN_DEBUG_OVERFLOW_SENTINEL = '0xffffffffu';
 
 type SupportedDebugFunctionName =
@@ -30,56 +28,18 @@ type SupportedDebugFunctionName =
     | 'debugMat4'
     | 'debugMat4x4f';
 
-interface DebugFunctionSpec {
-    readonly kind: DebugValueKind;
-    readonly valueType: string;
-}
-
-const DEBUG_FUNCTIONS: Record<SupportedDebugFunctionName, DebugFunctionSpec> = {
-    debugF32: {
-        kind: 'f32',
-        valueType: 'f32'
-    },
-    debugU32: {
-        kind: 'u32',
-        valueType: 'u32'
-    },
-    debugI32: {
-        kind: 'i32',
-        valueType: 'i32'
-    },
-    debugVec2: {
-        kind: 'vec2f',
-        valueType: 'vec2<f32>'
-    },
-    debugVec2f: {
-        kind: 'vec2f',
-        valueType: 'vec2<f32>'
-    },
-    debugVec3: {
-        kind: 'vec3f',
-        valueType: 'vec3<f32>'
-    },
-    debugVec3f: {
-        kind: 'vec3f',
-        valueType: 'vec3<f32>'
-    },
-    debugVec4: {
-        kind: 'vec4f',
-        valueType: 'vec4<f32>'
-    },
-    debugVec4f: {
-        kind: 'vec4f',
-        valueType: 'vec4<f32>'
-    },
-    debugMat4: {
-        kind: 'mat4x4f',
-        valueType: 'mat4x4<f32>'
-    },
-    debugMat4x4f: {
-        kind: 'mat4x4f',
-        valueType: 'mat4x4<f32>'
-    }
+const DEBUG_FUNCTIONS: Record<SupportedDebugFunctionName, DebugValueKind> = {
+    debugF32: 'f32',
+    debugU32: 'u32',
+    debugI32: 'i32',
+    debugVec2: 'vec2f',
+    debugVec2f: 'vec2f',
+    debugVec3: 'vec3f',
+    debugVec3f: 'vec3f',
+    debugVec4: 'vec4f',
+    debugVec4f: 'vec4f',
+    debugMat4: 'mat4x4f',
+    debugMat4x4f: 'mat4x4f'
 };
 
 const DEBUG_FUNCTION_NAMES = new Set<string>(Object.keys(DEBUG_FUNCTIONS));
@@ -292,6 +252,11 @@ function splitTopLevelArgs(argsSource: string): string[] {
     return args;
 }
 
+// for debug messages like: debugF32("message", value)
+// this function will be used to evaluate the "message" part,
+// It validates that the message is a double-quoted literal,
+// decodes simple escapes like \n, \", \\, and returns the actual
+// string.
 function decodeStringLiteral(literal: string): string {
     const trimmed = literal.trim();
     if (
@@ -364,7 +329,6 @@ function createMessageRegistry() {
 function validateEnableDebugCall(
     source: string,
     callName: string,
-    callStart: number,
     openParenIndex: number
 ): ParsedCall {
     const { args, endIndex } = parseCallSpan(source, openParenIndex);
@@ -381,9 +345,7 @@ function validateEnableDebugCall(
 
 function rewriteTypedDebugCall(
     source: string,
-    spec: DebugFunctionSpec,
     callName: string,
-    callStart: number,
     openParenIndex: number,
     messages: ReturnType<typeof createMessageRegistry>
 ): ScanResult {
@@ -478,7 +440,6 @@ function rewriteDebugSource(source: string): {
             const parsed = validateEnableDebugCall(
                 source,
                 identifier,
-                index,
                 afterIdentifier
             );
             output += source.slice(index, parsed.endIndex);
@@ -489,9 +450,7 @@ function rewriteDebugSource(source: string): {
         if (DEBUG_FUNCTION_NAMES.has(identifier)) {
             const rewritten = rewriteTypedDebugCall(
                 source,
-                DEBUG_FUNCTIONS[identifier as SupportedDebugFunctionName],
                 identifier,
-                index,
                 afterIdentifier,
                 registry
             );
@@ -512,12 +471,12 @@ function rewriteDebugSource(source: string): {
 
 function createDebugFunctionHelperWgsl(
     name: SupportedDebugFunctionName,
-    spec: DebugFunctionSpec
+    kind: DebugValueKind
 ): string {
-    const kindTag = DEBUG_KIND_TAGS[spec.kind];
-    const payloadWords = DEBUG_KIND_WORD_COUNTS[spec.kind];
+    const kindTag = DEBUG_KIND_TAGS[kind];
+    const payloadWords = DEBUG_KIND_WORD_COUNTS[kind];
 
-    switch (spec.kind) {
+    switch (kind) {
         case 'f32':
             return `fn ${name}(messageId: u32, value: f32) {
     if (!${VOLTEN_DEBUG_ENABLED_NAME}) {
@@ -642,10 +601,10 @@ function createDebugFunctionHelperWgsl(
 
 function createDebugSupportWgsl(capacityWords: number): string {
     const helpers = Object.entries(DEBUG_FUNCTIONS)
-        .map(([name, spec]) =>
+        .map(([name, kind]) =>
             createDebugFunctionHelperWgsl(
                 name as SupportedDebugFunctionName,
-                spec
+                kind
             )
         )
         .join('\n\n');
