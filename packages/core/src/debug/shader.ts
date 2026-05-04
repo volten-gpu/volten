@@ -609,7 +609,8 @@ function createDebugSupportWgsl(capacityWords: number): string {
         )
         .join('\n\n');
 
-    return `struct _volten_debug_storage_buffer {
+    return `
+struct _volten_debug_storage_buffer {
     cursor: atomic<u32>,
     dropped: atomic<u32>,
     data: array<u32>,
