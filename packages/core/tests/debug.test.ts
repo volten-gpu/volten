@@ -77,7 +77,7 @@ fn main() {
         expect(prepared.kernelSource).toContain(
             'debugVec3(2u, vec3f(1.0, 2.0, 3.0))'
         );
-        const supportWgsl = prepared.supportSections.join('\n');
+        const supportWgsl = prepared.supportWgsl.join('\n');
         expect(supportWgsl).toContain('fn enableDebug() {');
         expect(supportWgsl).toContain(
             'fn debugF32(messageId: u32, value: f32) {'

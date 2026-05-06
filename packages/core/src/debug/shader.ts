@@ -486,7 +486,7 @@ export function createDebugTransform(
             messages = rewritten.messages;
             return rewritten.source;
         },
-        supportSections: [createDebugSupportWgsl(capacityWords)],
+        supportWgsl: [createDebugSupportWgsl(capacityWords)],
         beforeUserMain: (gidName) => `${VOLTEN_DEBUG_BEGIN_FN}(${gidName});`,
         get messages() {
             return messages;

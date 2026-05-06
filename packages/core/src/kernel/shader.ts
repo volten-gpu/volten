@@ -7,7 +7,7 @@ import type { Kernel } from './kernel.js';
 export interface ShaderTransform {
     readonly transformSource?: (source: string) => string;
     readonly beforeUserMain?: EntryPointSetup | readonly EntryPointSetup[];
-    readonly supportSections?: readonly string[];
+    readonly supportWgsl?: readonly string[];
 }
 
 export interface KernelShaderPreparation {
@@ -16,7 +16,7 @@ export interface KernelShaderPreparation {
 
 export interface PreparedKernelShader {
     readonly kernelSource: string;
-    readonly supportSections: string[];
+    readonly supportWgsl: string[];
 }
 
 function collectEntryPointSetups(
@@ -46,8 +46,8 @@ export function prepareKernelShader(
         }
     }
     const beforeUserMain = collectEntryPointSetups(transforms);
-    const supportSections = transforms.flatMap(
-        (transform) => transform.supportSections ?? []
+    const supportWgsl = transforms.flatMap(
+        (transform) => transform.supportWgsl ?? []
     );
 
     const kernelSource = finalizeKernelSource(source, kernel.workgroupSize, {
@@ -57,8 +57,6 @@ export function prepareKernelShader(
 
     return {
         kernelSource,
-        supportSections: supportSections.filter(
-            (section) => section.trim().length > 0
-        )
+        supportWgsl: supportWgsl.filter((section) => section.trim().length > 0)
     };
 }

@@ -254,7 +254,7 @@ export class VoltenContext {
         const shaderCode = assembleFullShader(bindingEntries, {
             uniformLayoutMode: this._uniformLayoutMode,
             kernelSource: preparedShader.kernelSource,
-            additionalSections: preparedShader.supportSections
+            additionalSections: preparedShader.supportWgsl
         });
 
         // 5. Get or create pipeline
