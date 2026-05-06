@@ -1,4 +1,9 @@
 import { WGSL_TYPE_ALIASES } from '../types/primitives.js';
+import {
+    findFunctionSignature,
+    splitTopLevelCommaList,
+    type FunctionSignatureMatch
+} from './wgsl-source.js';
 
 /**
  * Builtin shorthand expansion for compute shader entry points.
@@ -38,21 +43,11 @@ const VOLTEN_USER_MAIN_NAME =
     '_volten_user_main_entrypoint_wrapper';
 const VOLTEN_GID_NAME = '_volten_guard_gid_builtin';
 
-/** Regex to find the start of the main function signature. */
-const MAIN_FN_START_REGEX = /fn\s+main\s*\(/;
-
 interface ParsedParameter {
     readonly original: string;
     readonly name: string;
     readonly type: string;
     readonly builtin?: string;
-}
-
-interface MainFunctionMatch {
-    readonly signatureStart: number;
-    readonly paramsStart: number;
-    readonly paramsEnd: number;
-    readonly params: string;
 }
 
 export type EntryPointSetup = string | ((gidName: string) => string);
@@ -72,34 +67,8 @@ function normalizeType(type: string): string {
     return WGSL_TYPE_ALIASES[stripped] ?? stripped;
 }
 
-function findMainFunction(source: string): MainFunctionMatch | null {
-    const match = MAIN_FN_START_REGEX.exec(source);
-    if (!match) {
-        return null;
-    }
-
-    const signatureStart = match.index;
-    const paramsStart = signatureStart + match[0].length;
-    let depth = 1;
-
-    for (let i = paramsStart; i < source.length; i++) {
-        const char = source[i];
-        if (char === '(') {
-            depth++;
-        } else if (char === ')') {
-            depth--;
-            if (depth === 0) {
-                return {
-                    signatureStart,
-                    paramsStart,
-                    paramsEnd: i,
-                    params: source.slice(paramsStart, i)
-                };
-            }
-        }
-    }
-
-    return null;
+function findMainFunction(source: string): FunctionSignatureMatch | null {
+    return findFunctionSignature(source, 'main');
 }
 
 /**
@@ -152,8 +121,7 @@ export function expandParameter(paramStr: string): string {
 export function expandParameterList(params: string): string {
     if (!params.trim()) return params;
 
-    return params
-        .split(',')
+    return splitTopLevelCommaList(params)
         .map((p) => expandParameter(p))
         .join(', ');
 }
@@ -206,7 +174,7 @@ function parseParameterList(params: string): ParsedParameter[] {
         return [];
     }
 
-    return params.split(',').map((p) => parseParameter(p));
+    return splitTopLevelCommaList(params).map((p) => parseParameter(p));
 }
 
 function formatComputeDecorators(

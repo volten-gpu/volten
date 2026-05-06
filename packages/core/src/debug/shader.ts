@@ -1,5 +1,12 @@
 import type { ShaderTransform } from '../kernel/shader.js';
 import {
+    isIdentifierPart,
+    isIdentifierStart,
+    parseParenthesizedSpan,
+    skipWhitespace,
+    splitTopLevelCommaList
+} from '../kernel/wgsl-source.js';
+import {
     DEBUG_KIND_TAGS,
     DEBUG_KIND_WORD_COUNTS,
     DEBUG_RECORD_HEADER_WORDS,
@@ -54,199 +61,6 @@ interface ParsedCall {
 
 export interface DebugShaderTransform extends ShaderTransform {
     readonly messages: readonly string[];
-}
-
-function isIdentifierStart(char: string): boolean {
-    return /[A-Za-z_]/.test(char);
-}
-
-function isIdentifierPart(char: string): boolean {
-    return /[A-Za-z0-9_]/.test(char);
-}
-
-function skipWhitespace(source: string, index: number): number {
-    let current = index;
-    while (current < source.length && /\s/.test(source[current])) {
-        current++;
-    }
-    return current;
-}
-
-function parseCallSpan(
-    source: string,
-    openParenIndex: number
-): { args: string; endIndex: number } {
-    let depth = 1;
-    let index = openParenIndex + 1;
-    let quote: '"' | "'" | null = null;
-    let lineComment = false;
-    let blockComment = false;
-
-    while (index < source.length) {
-        const char = source[index];
-        const next = source[index + 1];
-
-        if (lineComment) {
-            if (char === '\n') {
-                lineComment = false;
-            }
-            index++;
-            continue;
-        }
-
-        if (blockComment) {
-            if (char === '*' && next === '/') {
-                blockComment = false;
-                index += 2;
-                continue;
-            }
-            index++;
-            continue;
-        }
-
-        if (quote) {
-            if (char === '\\') {
-                index += 2;
-                continue;
-            }
-            if (char === quote) {
-                quote = null;
-            }
-            index++;
-            continue;
-        }
-
-        if (char === '/' && next === '/') {
-            lineComment = true;
-            index += 2;
-            continue;
-        }
-
-        if (char === '/' && next === '*') {
-            blockComment = true;
-            index += 2;
-            continue;
-        }
-
-        if (char === '"' || char === "'") {
-            quote = char as '"' | "'";
-            index++;
-            continue;
-        }
-
-        if (char === '(') {
-            depth++;
-            index++;
-            continue;
-        }
-
-        if (char === ')') {
-            depth--;
-            if (depth === 0) {
-                return {
-                    args: source.slice(openParenIndex + 1, index),
-                    endIndex: index + 1
-                };
-            }
-            index++;
-            continue;
-        }
-
-        index++;
-    }
-
-    throw new Error(
-        'Volten Error: Unterminated debug call while parsing shader source.'
-    );
-}
-
-function splitTopLevelArgs(argsSource: string): string[] {
-    const args: string[] = [];
-    let start = 0;
-    let depth = 0;
-    let index = 0;
-    let quote: '"' | "'" | null = null;
-    let lineComment = false;
-    let blockComment = false;
-
-    while (index < argsSource.length) {
-        const char = argsSource[index];
-        const next = argsSource[index + 1];
-
-        if (lineComment) {
-            if (char === '\n') {
-                lineComment = false;
-            }
-            index++;
-            continue;
-        }
-
-        if (blockComment) {
-            if (char === '*' && next === '/') {
-                blockComment = false;
-                index += 2;
-                continue;
-            }
-            index++;
-            continue;
-        }
-
-        if (quote) {
-            if (char === '\\') {
-                index += 2;
-                continue;
-            }
-            if (char === quote) {
-                quote = null;
-            }
-            index++;
-            continue;
-        }
-
-        if (char === '/' && next === '/') {
-            lineComment = true;
-            index += 2;
-            continue;
-        }
-
-        if (char === '/' && next === '*') {
-            blockComment = true;
-            index += 2;
-            continue;
-        }
-
-        if (char === '"' || char === "'") {
-            quote = char as '"' | "'";
-            index++;
-            continue;
-        }
-
-        if (char === '(' || char === '[' || char === '{') {
-            depth++;
-            index++;
-            continue;
-        }
-
-        if (char === ')' || char === ']' || char === '}') {
-            depth--;
-            index++;
-            continue;
-        }
-
-        if (char === ',' && depth === 0) {
-            args.push(argsSource.slice(start, index).trim());
-            start = index + 1;
-        }
-
-        index++;
-    }
-
-    const last = argsSource.slice(start).trim();
-    if (last) {
-        args.push(last);
-    }
-
-    return args;
 }
 
 // for debug messages like: debugF32("message", value)
@@ -328,7 +142,14 @@ function validateEnableDebugCall(
     callName: string,
     openParenIndex: number
 ): ParsedCall {
-    const { args, endIndex } = parseCallSpan(source, openParenIndex);
+    const { content: args, endIndex } = parseParenthesizedSpan(
+        source,
+        openParenIndex,
+        {
+            unterminatedMessage:
+                'Volten Error: Unterminated debug call while parsing shader source.'
+        }
+    );
     if (args.trim().length > 0) {
         throw new Error(
             `Volten Error: ${callName}() does not accept any arguments.`
@@ -346,8 +167,15 @@ function rewriteTypedDebugCall(
     openParenIndex: number,
     messages: ReturnType<typeof createMessageRegistry>
 ): ScanResult {
-    const { args, endIndex } = parseCallSpan(source, openParenIndex);
-    const parsedArgs = splitTopLevelArgs(args);
+    const { content: args, endIndex } = parseParenthesizedSpan(
+        source,
+        openParenIndex,
+        {
+            unterminatedMessage:
+                'Volten Error: Unterminated debug call while parsing shader source.'
+        }
+    );
+    const parsedArgs = splitTopLevelCommaList(args);
 
     let messageId = 0;
     let valueExpression: string | undefined;
