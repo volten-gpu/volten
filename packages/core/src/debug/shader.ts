@@ -12,7 +12,10 @@ import {
     DEBUG_RECORD_HEADER_WORDS,
     type DebugValueKind
 } from './types.js';
-import { VOLTEN_DEBUG_BUFFER_NAME } from './resource.js';
+import {
+    VOLTEN_DEBUG_BUFFER_NAME,
+    VOLTEN_DEBUG_BUFFER_STRUCT_NAME
+} from './resource.js';
 
 const VOLTEN_DEBUG_ENABLED_NAME = '_volten_debug_enabled';
 const VOLTEN_DEBUG_GID_NAME = '_volten_debug_gid';
@@ -435,7 +438,7 @@ function createDebugSupportWgsl(capacityWords: number): string {
         .join('\n\n');
 
     return `
-struct _volten_debug_storage_buffer {
+struct ${VOLTEN_DEBUG_BUFFER_STRUCT_NAME} {
     cursor: atomic<u32>,
     dropped: atomic<u32>,
     data: array<u32>,

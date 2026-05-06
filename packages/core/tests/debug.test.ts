@@ -4,6 +4,7 @@ import { prepareKernelShader } from '../src/kernel/shader.js';
 import { VoltenContext } from '../src/context.js';
 import {
     VOLTEN_DEBUG_BUFFER_NAME,
+    VOLTEN_DEBUG_BUFFER_STRUCT_NAME,
     createDebugTransform
 } from '../src/debug/index.js';
 
@@ -210,7 +211,7 @@ fn main() {
         expect(node._debug).not.toBeNull();
         expect((node as any)[VOLTEN_DEBUG_BUFFER_NAME]).toBeUndefined();
         expect(node._shaderCode).toContain(
-            `var<storage, read_write> ${VOLTEN_DEBUG_BUFFER_NAME}: _volten_debug_storage_buffer;`
+            `var<storage, read_write> ${VOLTEN_DEBUG_BUFFER_NAME}: ${VOLTEN_DEBUG_BUFFER_STRUCT_NAME};`
         );
     });
 

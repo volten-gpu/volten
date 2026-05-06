@@ -1,10 +1,16 @@
 import { RawBuffer } from '../data/raw-buffer.js';
 import type { ResolvedDebugOptions } from './types.js';
 
-export const VOLTEN_DEBUG_BUFFER_NAME =
-    '_volten_debug_buffer';
-export const VOLTEN_DEBUG_BUFFER_STRUCT_NAME =
-    '_volten_debug_storage_buffer';
+// @group(...) @binding(...) var<storage...> _volten_debug_buffer: ...;
+export const VOLTEN_DEBUG_BUFFER_NAME = '_volten_debug_buffer';
+/*
+struct _volten_debug_storage_buffer {
+    cursor: atomic<u32>,
+    dropped: atomic<u32>,
+    data: array<u32>,  // the full content of the debug buffer
+};
+*/
+export const VOLTEN_DEBUG_BUFFER_STRUCT_NAME = '_volten_debug_storage_buffer';
 
 const DEBUG_RESET_HEADER = new Uint32Array([0, 0]);
 
