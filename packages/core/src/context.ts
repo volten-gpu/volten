@@ -244,6 +244,10 @@ export class VoltenContext {
         const preparedShader = prepareKernelShader(kernel, {
             transforms: debugTransform ? [debugTransform] : []
         });
+
+        // the reason why this if-statement sits here is
+        // that `prepareKernelShader` will run the debug-transform
+        // and only afterwards the "messages" property will be populated
         if (debugResource && debugTransform) {
             debugState = {
                 resource: debugResource,
@@ -685,7 +689,9 @@ export class VoltenContext {
             );
         }
 
-        const readback = await this._readConcreteBuffers([node._debug.resource.buffer]);
+        const readback = await this._readConcreteBuffers([
+            node._debug.resource.buffer
+        ]);
         const raw = readback.get(node._debug.resource.buffer);
         if (!(raw instanceof ArrayBuffer)) {
             throw new Error(
