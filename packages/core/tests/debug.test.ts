@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Kernel } from '../src/kernel/kernel.js';
+import { prepareKernelShader } from '../src/kernel/shader.js';
 import { VoltenContext } from '../src/context.js';
 import {
     VOLTEN_DEBUG_BUFFER_NAME,
-    prepareDebugShader
+    createDebugTransform
 } from '../src/debug/index.js';
 
 const GPUBufferUsage = {
@@ -59,9 +60,12 @@ fn main() {
             { threads: 1 }
         );
 
-        const prepared = prepareDebugShader(kernel, 256);
+        const debug = createDebugTransform(256);
+        const prepared = prepareKernelShader(kernel, {
+            transforms: [debug]
+        });
 
-        expect(prepared.messages).toEqual(['after multiply', 'normal']);
+        expect(debug.messages).toEqual(['after multiply', 'normal']);
         expect(prepared.kernelSource).toContain(
             '@builtin(global_invocation_id) _volten_guard_gid_builtin: vec3<u32>'
         );
@@ -73,11 +77,12 @@ fn main() {
         expect(prepared.kernelSource).toContain(
             'debugVec3(2u, vec3f(1.0, 2.0, 3.0))'
         );
-        expect(prepared.supportWgsl).toContain('fn enableDebug() {');
-        expect(prepared.supportWgsl).toContain(
+        const supportWgsl = prepared.supportSections.join('\n');
+        expect(supportWgsl).toContain('fn enableDebug() {');
+        expect(supportWgsl).toContain(
             'fn debugF32(messageId: u32, value: f32) {'
         );
-        expect(prepared.supportWgsl).toContain(
+        expect(supportWgsl).toContain(
             'var<private> _volten_debug_enabled: bool = false;'
         );
     });
@@ -92,9 +97,10 @@ fn main() {
             { threads: 1 }
         );
 
-        expect(() => prepareDebugShader(kernel, 256)).toThrow(
-            /Generic debug\(\.\.\.\) is not supported/
-        );
+        const debug = createDebugTransform(256);
+        expect(() =>
+            prepareKernelShader(kernel, { transforms: [debug] })
+        ).toThrow(/Generic debug\(\.\.\.\) is not supported/);
     });
 
     it('keeps comparison operators from affecting debug argument splitting', () => {
@@ -111,9 +117,12 @@ fn main() {
             { threads: 1 }
         );
 
-        const prepared = prepareDebugShader(kernel, 256);
+        const debug = createDebugTransform(256);
+        const prepared = prepareKernelShader(kernel, {
+            transforms: [debug]
+        });
 
-        expect(prepared.messages).toEqual(['chosen']);
+        expect(debug.messages).toEqual(['chosen']);
         expect(prepared.kernelSource).toContain(
             'debugF32(1u, choose(1.0, 2.0, 3.0 > 2.0))'
         );

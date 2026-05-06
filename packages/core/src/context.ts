@@ -46,6 +46,7 @@ import {
     resolveBounds,
     resolveDispatch
 } from './kernel/bindings.js';
+import { prepareKernelShader } from './kernel/shader.js';
 import { VOLTEN_BOUNDS_NAME } from './kernel/builtins.js';
 import {
     createNode,
@@ -70,7 +71,7 @@ import {
     DebugBufferResource,
     VOLTEN_DEBUG_BUFFER_NAME,
     decodeDebugBuffer,
-    prepareDebugShader,
+    createDebugTransform,
     resolveDebugOptions,
     type DebugReadResult
 } from './debug/index.js';
@@ -220,17 +221,18 @@ export class VoltenContext {
             readonly resource: DebugBufferResource;
             readonly messages: readonly string[];
         } | null = null;
-        let debugShaderCode: ReturnType<typeof prepareDebugShader> | null = null;
+        let debugResource: DebugBufferResource | null = null;
+        let debugTransform: ReturnType<typeof createDebugTransform> | null =
+            null;
 
         if (debugOptions) {
-            debugShaderCode = prepareDebugShader(kernel, debugOptions.capacityWords);
-            const resource = new DebugBufferResource(debugOptions, `${nodeLabel} debug`);
-            ownedResources.push(resource);
-            executionBindings[VOLTEN_DEBUG_BUFFER_NAME] = resource.buffer;
-            debugState = {
-                resource,
-                messages: debugShaderCode.messages
-            };
+            debugTransform = createDebugTransform(debugOptions.capacityWords);
+            debugResource = new DebugBufferResource(
+                debugOptions,
+                `${nodeLabel} debug`
+            );
+            ownedResources.push(debugResource);
+            executionBindings[VOLTEN_DEBUG_BUFFER_NAME] = debugResource.buffer;
         }
 
         // 3. Generate binding entries (classify & validate)
@@ -238,13 +240,21 @@ export class VoltenContext {
             uniformLayoutMode: this._uniformLayoutMode
         });
 
-        // 4. Assemble full shader source
-        const shaderCode = assembleFullShader(kernel, bindingEntries, {
+        // 4. Prepare and assemble full shader source
+        const preparedShader = prepareKernelShader(kernel, {
+            transforms: debugTransform ? [debugTransform] : []
+        });
+        if (debugResource && debugTransform) {
+            debugState = {
+                resource: debugResource,
+                messages: debugTransform.messages
+            };
+        }
+
+        const shaderCode = assembleFullShader(bindingEntries, {
             uniformLayoutMode: this._uniformLayoutMode,
-            kernelSource: debugShaderCode?.kernelSource,
-            additionalSections: debugShaderCode
-                ? [debugShaderCode.supportWgsl]
-                : undefined
+            kernelSource: preparedShader.kernelSource,
+            additionalSections: preparedShader.supportSections
         });
 
         // 5. Get or create pipeline

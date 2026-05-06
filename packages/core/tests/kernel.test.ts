@@ -9,7 +9,8 @@ import {
     expandParameter,
     expandParameterList,
     expandBuiltinShorthands,
-    processShaderSource
+    finalizeKernelSource,
+    prepareKernelShader
 } from '../src/kernel/index.js';
 
 // =============================================================================
@@ -254,10 +255,10 @@ fn main(gid: vec3<u32>) { }
 // =============================================================================
 
 describe('Compute Decorator Injection', () => {
-    describe('processShaderSource()', () => {
+    describe('finalizeKernelSource()', () => {
         it('injects @compute and @workgroup_size in unguarded mode', () => {
             const source = `fn main(gid: vec3<u32>) { }`;
-            const result = processShaderSource(source, [64, 1, 1], {
+            const result = finalizeKernelSource(source, [64, 1, 1], {
                 unsafeManualBounds: true
             });
             expect(result).toBe(`@compute @workgroup_size(64, 1, 1)
@@ -266,13 +267,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) { }`);
 
         it('uses the default workgroup size', () => {
             const source = `fn main(gid: vec3<u32>) { }`;
-            const result = processShaderSource(source);
+            const result = finalizeKernelSource(source);
             expect(result).toContain('@workgroup_size(64, 1, 1)');
         });
 
         it('supports custom workgroup size in unguarded mode', () => {
             const source = `fn main() { }`;
-            const result = processShaderSource(source, [256, 4, 2], {
+            const result = finalizeKernelSource(source, [256, 4, 2], {
                 unsafeManualBounds: true
             });
             expect(result).toContain('@workgroup_size(256, 4, 2)');
@@ -282,7 +283,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) { }`);
             const source = `fn main(gid: vec3<u32>) {
     output[gid.x] = input[gid.x] * 2.0;
 }`;
-            const result = processShaderSource(source, [128, 1, 1]);
+            const result = finalizeKernelSource(source, [128, 1, 1]);
             expect(result).toContain('@compute @workgroup_size(128, 1, 1)');
             expect(result).toContain(
                 `if (any(gid >= ${VOLTEN_BOUNDS_NAME}.xyz))`
@@ -299,7 +300,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) { }`);
             const source = `fn main(lid: u32) {
     output[lid] = input[lid] * 2.0;
 }`;
-            const result = processShaderSource(source, [64, 1, 1]);
+            const result = finalizeKernelSource(source, [64, 1, 1]);
             expect(result).toContain(
                 '@builtin(local_invocation_index) lid: u32'
             );
@@ -315,7 +316,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) { }`);
             const source = `fn main(gid: vec3<u32>) {
     output[gid.x] = input[gid.x] * 2.0;
 }`;
-            const result = processShaderSource(source, [128, 1, 1], {
+            const result = finalizeKernelSource(source, [128, 1, 1], {
                 unsafeManualBounds: true
             });
             expect(result).toContain('@compute @workgroup_size(128, 1, 1)');
@@ -471,7 +472,7 @@ describe('Kernel Class', () => {
         });
     });
 
-    describe('assembledSource', () => {
+    describe('prepareKernelShader()', () => {
         it('expands shorthands and injects decorators', () => {
             const kernel = new Kernel(
                 `
@@ -481,11 +482,12 @@ fn main(gid: vec3<u32>) {
 `,
                 { workgroupSize: [128] }
             );
+            const prepared = prepareKernelShader(kernel);
 
-            expect(kernel.assembledSource).toContain(
+            expect(prepared.kernelSource).toContain(
                 '@compute @workgroup_size(128, 1, 1)'
             );
-            expect(kernel.assembledSource).toContain(
+            expect(prepared.kernelSource).toContain(
                 '@builtin(global_invocation_id) gid: vec3<u32>'
             );
         });
@@ -499,27 +501,22 @@ fn main(gid: vec3u) {
 `,
                 { workgroupSize: [128] }
             );
+            const prepared = prepareKernelShader(kernel);
 
-            expect(kernel.assembledSource).toContain(
+            expect(prepared.kernelSource).toContain(
                 '@compute @workgroup_size(128, 1, 1)'
             );
-            expect(kernel.assembledSource).toContain(
+            expect(prepared.kernelSource).toContain(
                 '@builtin(global_invocation_id) gid: vec3u'
             );
-        });
-
-        it('caches assembled source', () => {
-            const kernel = new Kernel('fn main() { }');
-            const first = kernel.assembledSource;
-            const second = kernel.assembledSource;
-            expect(first).toBe(second); // Same object reference
         });
 
         it('preserves original source', () => {
             const original = 'fn main(gid: vec3<u32>) { }';
             const kernel = new Kernel(original);
+            const prepared = prepareKernelShader(kernel);
             expect(kernel.source).toBe(original);
-            expect(kernel.assembledSource).not.toBe(original);
+            expect(prepared.kernelSource).not.toBe(original);
         });
     });
 });

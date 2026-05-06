@@ -1,5 +1,4 @@
-import { processShaderSource } from '../kernel/builtins.js';
-import type { Kernel } from '../kernel/kernel.js';
+import type { ShaderTransform } from '../kernel/shader.js';
 import {
     DEBUG_KIND_TAGS,
     DEBUG_KIND_WORD_COUNTS,
@@ -53,9 +52,7 @@ interface ParsedCall {
     readonly endIndex: number;
 }
 
-export interface PreparedDebugShader {
-    readonly kernelSource: string;
-    readonly supportWgsl: string;
+export interface DebugShaderTransform extends ShaderTransform {
     readonly messages: readonly string[];
 }
 
@@ -650,26 +647,21 @@ fn ${VOLTEN_DEBUG_WRITE_HEADER_FN}(start: u32, kind: u32, messageId: u32, payloa
 ${helpers}`;
 }
 
-export function prepareDebugShader(
-    kernel: Kernel,
+export function createDebugTransform(
     capacityWords: number
-): PreparedDebugShader {
-    const rewritten = rewriteDebugSource(kernel.source);
-    const kernelSource = processShaderSource(
-        rewritten.source,
-        kernel.workgroupSize,
-        {
-            unsafeManualBounds: kernel.unsafeManualBounds,
-            forceWrapper: true,
-            requireGlobalInvocationId: true,
-            entryPointPrelude: (gidName) =>
-                `${VOLTEN_DEBUG_BEGIN_FN}(${gidName});`
-        }
-    );
+): DebugShaderTransform {
+    let messages: readonly string[] = [];
 
     return {
-        kernelSource,
-        supportWgsl: createDebugSupportWgsl(capacityWords),
-        messages: rewritten.messages
+        transformSource(source) {
+            const rewritten = rewriteDebugSource(source);
+            messages = rewritten.messages;
+            return rewritten.source;
+        },
+        supportSections: [createDebugSupportWgsl(capacityWords)],
+        beforeUserMain: (gidName) => `${VOLTEN_DEBUG_BEGIN_FN}(${gidName});`,
+        get messages() {
+            return messages;
+        }
     };
 }

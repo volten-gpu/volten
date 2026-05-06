@@ -1,7 +1,6 @@
 // Kernel class
 // Stores shader source code, output declarations, and thread configuration
 
-import { processShaderSource } from './builtins.js';
 import { makeLabel } from '../utils/labels.js';
 
 const BARRIER_USAGE_REGEX = /\b(?:workgroupBarrier|storageBarrier)\s*\(/;
@@ -184,9 +183,6 @@ export class Kernel {
     /** Skip Volten's hidden dispatch-bounds guard and manage bounds manually. */
     readonly unsafeManualBounds: boolean;
 
-    /** Cached assembled source (with injections) */
-    private _assembledSource: string | null = null;
-
     constructor(source: string, options?: KernelOptions) {
         this.label = makeLabel('Kernel', options?.label);
         this.source = source;
@@ -197,25 +193,6 @@ export class Kernel {
         this.threads = options?.threads;
         this.usesBarrier = BARRIER_USAGE_REGEX.test(source);
         this.unsafeManualBounds = options?.unsafeManualBounds ?? false;
-    }
-
-    /**
-     * Get the assembled WGSL source with all transformations applied:
-     * - Builtin shorthand expansion
-     * - @compute and @workgroup_size injection
-     *
-     * Note: Binding injections (group/binding) are deferred to the DAG compiler
-     * at v.pass() time when actual buffers are known.
-     */
-    get assembledSource(): string {
-        if (this._assembledSource === null) {
-            this._assembledSource = processShaderSource(
-                this.source,
-                this.workgroupSize,
-                { unsafeManualBounds: this.unsafeManualBounds }
-            );
-        }
-        return this._assembledSource;
     }
 
     /**

@@ -210,28 +210,23 @@ export function generateBindingWgsl(entries: BindingEntry[]): string {
 }
 
 /**
- * Assemble the full shader source: binding declarations + kernel source.
- *
- * The binding WGSL is prepended to the kernel's assembled source (which already
- * has builtin shorthands expanded and @compute/@workgroup_size injected).
+ * Assemble the full shader source around an already-prepared kernel source.
  *
  * `assembleFullShader` is thus responsible for pass-time composition:
  * type declarations, binding declarations, optional extension lines.
  *
- * @param kernel - The kernel definition
  * @param entries - Classified binding entries
  * @returns Complete WGSL shader source ready for pipeline creation
  */
 export function assembleFullShader(
-    kernel: Kernel,
     entries: BindingEntry[],
-    options?: {
+    options: {
         uniformLayoutMode?: UniformLayoutMode;
-        kernelSource?: string;
+        kernelSource: string;
         additionalSections?: string[];
     }
 ): string {
-    const uniformLayoutMode = options?.uniformLayoutMode ?? 'classic';
+    const uniformLayoutMode = options.uniformLayoutMode ?? 'classic';
     const bindingTypeInfo: BindingTypeInfo[] = entries.map((entry) => ({
         name: entry.name,
         wgslAddressSpace: entry.wgslAddressSpace,
@@ -245,8 +240,8 @@ export function assembleFullShader(
     const requiresUniformStandardLayout =
         uniformLayoutMode === 'standard' &&
         entries.some((entry) => entry.wgslAddressSpace === 'uniform');
-    const kernelSource = options?.kernelSource ?? kernel.assembledSource;
-    const additionalSections = options?.additionalSections ?? [];
+    const kernelSource = options.kernelSource;
+    const additionalSections = options.additionalSections ?? [];
 
     if (
         !bindingWgsl &&

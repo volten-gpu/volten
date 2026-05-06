@@ -12,4 +12,7 @@ export {
     type NodeDebugState
 } from './resource.js';
 export { decodeDebugBuffer } from './decode.js';
-export { prepareDebugShader } from './shader.js';
+export {
+    createDebugTransform,
+    type DebugShaderTransform
+} from './shader.js';

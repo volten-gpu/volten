@@ -19,6 +19,7 @@ import {
     resolveDispatch
 } from '../src/kernel/bindings.js';
 import { Kernel } from '../src/kernel/kernel.js';
+import { prepareKernelShader } from '../src/kernel/shader.js';
 import { VOLTEN_BOUNDS_NAME } from '../src/kernel/builtins.js';
 import { Buffer } from '../src/data/buffer.js';
 import { RawBuffer } from '../src/data/raw-buffer.js';
@@ -47,6 +48,20 @@ function makeBuffer(
     access: 'r' | 'rw' = 'r'
 ): Buffer {
     return new Buffer(data, type as any, access);
+}
+
+function assembleKernelShader(
+    kernel: Kernel,
+    entries: ReturnType<typeof generateBindings>,
+    options?: {
+        uniformLayoutMode?: 'classic' | 'standard';
+    }
+): string {
+    const prepared = prepareKernelShader(kernel);
+    return assembleFullShader(entries, {
+        ...options,
+        kernelSource: prepared.kernelSource
+    });
 }
 
 function makeRawBuffer(
@@ -284,7 +299,7 @@ fn main(gid: vec3u) {
             const input = makeBuffer([1, 2, 3], 'f32', 'r');
             const output = makeBuffer([0, 0, 0], 'f32', 'rw');
             const entries = generateBindings({ input, output }, kernel);
-            const shader = assembleFullShader(kernel, entries);
+            const shader = assembleKernelShader(kernel, entries);
 
             // Bindings should come before the function
             const bindingPos = shader.indexOf('@group(0)');
@@ -298,7 +313,7 @@ fn main(gid: vec3u) {
                 workgroupSize: [128]
             });
             const entries = generateBindings({}, kernel);
-            const shader = assembleFullShader(kernel, entries);
+            const shader = assembleKernelShader(kernel, entries);
 
             expect(shader).toContain('@compute @workgroup_size(128, 1, 1)');
         });
@@ -306,7 +321,7 @@ fn main(gid: vec3u) {
         it('includes builtin expansion from kernel assembly', () => {
             const kernel = new Kernel('fn main(gid: vec3u) { }');
             const entries = generateBindings({}, kernel);
-            const shader = assembleFullShader(kernel, entries);
+            const shader = assembleKernelShader(kernel, entries);
 
             expect(shader).toContain(
                 '@builtin(global_invocation_id) gid: vec3u'
@@ -316,9 +331,9 @@ fn main(gid: vec3u) {
         it('returns kernel source alone when no bindings', () => {
             const kernel = new Kernel('fn main() { }');
             const entries = generateBindings({}, kernel);
-            const shader = assembleFullShader(kernel, entries);
+            const shader = assembleKernelShader(kernel, entries);
 
-            expect(shader).toBe(kernel.assembledSource);
+            expect(shader).toBe(prepareKernelShader(kernel).kernelSource);
         });
 
         it('auto-emits struct declarations for struct-typed storage bindings', () => {
@@ -328,7 +343,7 @@ fn main(gid: vec3u) {
             });
             const particles = new Buffer([{ mass: 1 }], Particle, 'r');
             const entries = generateBindings({ particles }, kernel);
-            const shader = assembleFullShader(kernel, entries);
+            const shader = assembleKernelShader(kernel, entries);
 
             expect(shader).toContain('struct Particle {');
             expect(shader).toContain('mass: f32,');
@@ -348,7 +363,7 @@ fn main(gid: vec3u) {
             const entries = generateBindings({ params }, kernel, {
                 uniformLayoutMode: 'classic'
             });
-            const shader = assembleFullShader(kernel, entries, {
+            const shader = assembleKernelShader(kernel, entries, {
                 uniformLayoutMode: 'classic'
             });
 
@@ -367,7 +382,7 @@ fn main(gid: vec3u) {
             const entries = generateBindings({ params }, kernel, {
                 uniformLayoutMode: 'standard'
             });
-            const shader = assembleFullShader(kernel, entries, {
+            const shader = assembleKernelShader(kernel, entries, {
                 uniformLayoutMode: 'standard'
             });
 
@@ -389,7 +404,7 @@ fn main(gid: vec3u) {
             });
 
             expect(() =>
-                assembleFullShader(kernel, entries, {
+                assembleKernelShader(kernel, entries, {
                     uniformLayoutMode: 'classic'
                 })
             ).toThrow(/16-byte array stride/);
@@ -418,7 +433,7 @@ fn main(gid: vec3u) {
             );
 
             expect(() =>
-                assembleFullShader(kernel, entries, {
+                assembleKernelShader(kernel, entries, {
                     uniformLayoutMode: 'classic'
                 })
             ).toThrow(/used by both storage and classic-uniform layouts/);
