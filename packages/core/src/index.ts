@@ -24,4 +24,3 @@ export type {
 
 // Re-export types for consumers
 export type { Node, Handle } from './graph/index.js';
-

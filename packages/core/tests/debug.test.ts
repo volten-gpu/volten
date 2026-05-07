@@ -165,6 +165,7 @@ describe('VoltenContext Debug Integration', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        mockGetMappedRange.mockReset();
 
         mockCreateCommandEncoder.mockReturnValue({
             beginComputePass: mockBeginComputePass,
@@ -231,9 +232,9 @@ fn main() {
         v.run(node);
 
         expect(mockWriteBuffer).toHaveBeenCalledTimes(1);
-        expect(Array.from(mockWriteBuffer.mock.calls[0][2] as Uint32Array)).toEqual(
-            [0, 0]
-        );
+        expect(
+            Array.from(mockWriteBuffer.mock.calls[0][2] as Uint32Array)
+        ).toEqual([0, 0]);
     });
 
     it('decodes debug logs from the hidden debug buffer', async () => {
@@ -296,6 +297,49 @@ fn main() {
             message: 'vector',
             value: [1, 2, 3]
         });
+    });
+
+    it('prints debug logs as plain text', async () => {
+        const v = new VoltenContext(mockDevice);
+        const kernel = new Kernel(
+            `
+fn main() {
+    enableDebug();
+    debugVec4f("vector", vec4f(0.0, 1.0, 2.0, 3.0));
+}
+`,
+            { threads: 1 }
+        );
+
+        const node = v.pass(kernel, {}, { debug: { bufferSize: 64 } });
+        const words = new Uint32Array(
+            node._debug!.resource.buffer.byteLength / 4
+        );
+        const consoleLog = vi
+            .spyOn(console, 'log')
+            .mockImplementation(() => {});
+
+        words[0] = 10;
+        words[1] = 0;
+        words[2] = 6;
+        words[3] = 1;
+        words[4] = 1;
+        words[5] = 0;
+        words[6] = 0;
+        words[7] = 4;
+        words[8] = encodeF32(0);
+        words[9] = encodeF32(1);
+        words[10] = encodeF32(2);
+        words[11] = encodeF32(3);
+
+        mockGetMappedRange.mockReturnValue(words.buffer);
+
+        const result = await v.readDebug(node);
+        result.print();
+
+        expect(consoleLog).toHaveBeenCalledWith('[1,0,0] vector: 0, 1, 2, 3');
+
+        consoleLog.mockRestore();
     });
 
     it('throws when readDebug() is called on a node without debug support', async () => {

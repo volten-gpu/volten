@@ -50,6 +50,7 @@ export interface DebugReadResult {
     readonly usedWords: number;
     readonly truncated: boolean;
     readonly bufferSize: number;
+    print(): void;
 }
 
 export function resolveDebugOptions(

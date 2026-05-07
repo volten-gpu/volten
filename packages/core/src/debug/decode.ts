@@ -25,7 +25,10 @@ function decodeWordAsI32(word: number): number {
     return view.getInt32(0, true);
 }
 
-function decodePayload(kind: DebugValueKind, payload: Uint32Array): number | number[] {
+function decodePayload(
+    kind: DebugValueKind,
+    payload: Uint32Array
+): number | number[] {
     switch (kind) {
         case 'f32':
             return decodeWordAsF32(payload[0]);
@@ -38,6 +41,31 @@ function decodePayload(kind: DebugValueKind, payload: Uint32Array): number | num
         case 'vec4f':
         case 'mat4x4f':
             return Array.from(payload, (word) => decodeWordAsF32(word));
+    }
+}
+
+function formatDebugScalar(value: number): string {
+    return Object.is(value, -0) ? '-0' : String(value);
+}
+
+function formatDebugValue(value: number | number[]): string {
+    if (Array.isArray(value)) {
+        return value.map(formatDebugScalar).join(', ');
+    }
+
+    return formatDebugScalar(value);
+}
+
+function formatDebugGid(gid: readonly [number, number, number]): string {
+    return `[${gid.join(',')}]`;
+}
+
+function printDebugLogs(logs: readonly DebugLog[]): void {
+    for (const log of logs) {
+        const message = log.message ? `${log.message}: ` : '';
+        console.log(
+            `${formatDebugGid(log.gid)} ${message}${formatDebugValue(log.value)}`
+        );
     }
 }
 
@@ -81,7 +109,9 @@ export function decodeDebugBuffer(
                 words[cursor + 4] ?? 0
             ],
             message:
-                messageId === 0 ? undefined : messages[messageId - 1] ?? undefined,
+                messageId === 0
+                    ? undefined
+                    : (messages[messageId - 1] ?? undefined),
             value: decodePayload(kind, payload)
         });
 
@@ -93,6 +123,7 @@ export function decodeDebugBuffer(
         dropped,
         usedWords,
         truncated,
-        bufferSize
+        bufferSize,
+        print: () => printDebugLogs(logs)
     };
 }
