@@ -102,7 +102,7 @@ function resolveHandleSource(handle: Handle): {
 }
 
 /**
- * Generate binding entries from user-provided bindings and kernel definition.
+ * Generate binding entries from user-provided bindings.
  *
  * Classification rules:
  * - Buffer → var<storage, read|read_write> based on buffer.access
@@ -111,12 +111,10 @@ function resolveHandleSource(handle: Handle): {
  * - Anything else → throws an error
  *
  * @param bindings - User-provided bindings record
- * @param kernel - The kernel definition
  * @returns Array of classified binding entries
  */
 export function generateBindings(
     bindings: Record<string, unknown>,
-    kernel: Kernel,
     options?: { uniformLayoutMode?: UniformLayoutMode }
 ): BindingEntry[] {
     const entries: BindingEntry[] = [];
@@ -400,20 +398,6 @@ function getBindingCount(value: unknown, name: string): number {
         `Volten Error: Cannot infer thread count from binding "${name}" — ` +
             `it is not a Buffer.`
     );
-}
-
-/**
- * Convert a 1D total thread count to workgroup dispatch dimensions.
- * Equivalent to threadsToDispatch3D([totalThreads, 1, 1], workgroupSize).
- *
- * Scalar threads are treated identically to [N, 1, 1] — all dispatch
- * paths use per-axis division for a single, consistent mental model.
- */
-function threadsToDispatch(
-    totalThreads: number,
-    workgroupSize: [number, number, number]
-): [number, number, number] {
-    return threadsToDispatch3D([totalThreads, 1, 1], workgroupSize);
 }
 
 /**

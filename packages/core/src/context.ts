@@ -236,7 +236,7 @@ export class VoltenContext {
         }
 
         // 3. Generate binding entries (classify & validate)
-        const bindingEntries = generateBindings(executionBindings, kernel, {
+        const bindingEntries = generateBindings(executionBindings, {
             uniformLayoutMode: this._uniformLayoutMode
         });
 

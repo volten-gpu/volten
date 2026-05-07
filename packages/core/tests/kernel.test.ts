@@ -465,8 +465,7 @@ describe('Kernel Class', () => {
         });
 
         it('stores function threads spec', () => {
-            const fn = (data: Record<string, unknown>) =>
-                [100, 1, 1] as [number, number, number];
+            const fn = () => [100, 1, 1] as [number, number, number];
             const kernel = new Kernel('fn main() { }', { threads: fn });
             expect(kernel.threads).toBe(fn);
         });

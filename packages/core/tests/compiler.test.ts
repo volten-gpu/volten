@@ -4,12 +4,7 @@ import {
     resolveConcreteBuffer,
     type ExecutionPlan
 } from '../src/graph/compiler.js';
-import {
-    createNode,
-    isHandle,
-    type Node,
-    type Handle
-} from '../src/graph/node.js';
+import { createNode, type Node, type Handle } from '../src/graph/node.js';
 import { Buffer } from '../src/data/buffer.js';
 import { RawBuffer } from '../src/data/raw-buffer.js';
 
