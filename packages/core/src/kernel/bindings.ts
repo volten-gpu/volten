@@ -4,7 +4,7 @@
 import { Buffer } from '../data/buffer.js';
 import { RawBuffer } from '../data/raw-buffer.js';
 import { Uniform } from '../data/uniform.js';
-import { resolveConcreteBuffer } from '../graph/compiler.js';
+import { resolveConcreteBuffer } from './resource-resolution.js';
 import { type Handle, isHandle } from '../graph/node.js';
 import type { TypeDescriptor } from '../types/schema.js';
 import {

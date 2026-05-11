@@ -4,13 +4,12 @@
 import { type BufferAccess } from './buffer.js';
 import { makeLabel } from '../utils/labels.js';
 import { createResourceId } from './resource-identity.js';
+import { asUint8Array, copyBytes, type ByteSource } from '../utils/bytes.js';
 
 export interface RawBufferOptions {
     /** Optional human-friendly label for debugger/devtools usage. */
     label?: string;
 }
-
-type RawBufferData = ArrayBuffer | ArrayBufferView;
 
 /**
  * RawBuffer for pre-packed data
@@ -120,8 +119,8 @@ export class RawBuffer {
      * Replace the full CPU-provided contents without resizing the buffer.
      * If uploaded, the existing GPUBuffer is updated in place.
      */
-    set(data: RawBufferData): void {
-        const bytes = toUint8Array(data);
+    set(data: ByteSource): void {
+        const bytes = asUint8Array(data);
         if (bytes.byteLength !== this.byteLength) {
             throw new Error(
                 `Volten Error: RawBuffer "${this.label}" update changed byte length ` +
@@ -141,8 +140,8 @@ export class RawBuffer {
      * Update a byte range. Offset is measured in bytes.
      * If uploaded, the existing GPUBuffer is updated in place.
      */
-    update(data: RawBufferData, byteOffset = 0): void {
-        const bytes = toUint8Array(data);
+    update(data: ByteSource, byteOffset = 0): void {
+        const bytes = asUint8Array(data);
         this.validateUpdateRange(bytes.byteLength, byteOffset);
 
         new Uint8Array(this.packedData).set(bytes, byteOffset);
@@ -199,17 +198,4 @@ export class RawBuffer {
             );
         }
     }
-}
-
-function toUint8Array(data: RawBufferData): Uint8Array {
-    if (data instanceof ArrayBuffer) {
-        return new Uint8Array(data);
-    }
-    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-}
-
-function copyBytes(bytes: Uint8Array): ArrayBuffer {
-    const copy = new ArrayBuffer(bytes.byteLength);
-    new Uint8Array(copy).set(bytes);
-    return copy;
 }

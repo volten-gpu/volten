@@ -59,9 +59,10 @@
 
 import type { Node } from './node.js';
 import { collectNodes, topologicalSort } from './scheduler.js';
-import { Buffer } from '../data/buffer.js';
-import { RawBuffer } from '../data/raw-buffer.js';
-import { isHandle } from './node.js';
+import { resolveConcreteBuffer } from '../kernel/resource-resolution.js';
+import type { Buffer } from '../data/buffer.js';
+import type { RawBuffer } from '../data/raw-buffer.js';
+export { resolveConcreteBuffer } from '../kernel/resource-resolution.js';
 
 /**
  * The output of the compile step. Contains a sorted list of nodes
@@ -70,35 +71,6 @@ import { isHandle } from './node.js';
 export interface ExecutionPlan {
     /** Nodes in topological (execution) order. */
     readonly sorted: readonly Node[];
-}
-
-/**
- * Walk a Handle chain to find the root Buffer or RawBuffer.
- *
- * Returns null if the binding is not buffer-like (e.g., a scalar uniform
- * that was somehow passed through, or a future PoolSlot placeholder).
- *
- * @example
- * ```
- * // A = v.pass(k, { in: buf, out: outBuf })
- * // B = v.pass(k, { in: A.out })
- *
- * resolveConcreteBuffer(buf)    // → buf (Buffer)
- * resolveConcreteBuffer(A.out)  // → outBuf (Buffer) — walks A._bindings['out']
- * resolveConcreteBuffer(B.in)   // → outBuf (Buffer) — walks B._bindings['in'] → A.out → outBuf
- * ```
- */
-export function resolveConcreteBuffer(
-    value: unknown
-): Buffer | RawBuffer | null {
-    if (value instanceof Buffer || value instanceof RawBuffer) {
-        return value;
-    }
-    if (isHandle(value)) {
-        const parentBinding = value._node._bindings[value._name];
-        return resolveConcreteBuffer(parentBinding);
-    }
-    return null;
 }
 
 /**

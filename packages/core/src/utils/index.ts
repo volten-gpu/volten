@@ -6,3 +6,4 @@ export {
     getStride,
     getByteLength
 } from './alignment.js';
+export { asUint8Array, copyBytes, type ByteSource } from './bytes.js';

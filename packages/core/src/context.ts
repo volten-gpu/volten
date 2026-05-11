@@ -46,6 +46,8 @@ import {
     resolveBounds,
     resolveDispatch
 } from './kernel/bindings.js';
+import { getOrCreateNodeBindGroup } from './kernel/bind-groups.js';
+import { resolveConcreteBuffer } from './kernel/resource-resolution.js';
 import { prepareKernelShader } from './kernel/shader.js';
 import { VOLTEN_BOUNDS_NAME } from './kernel/builtins.js';
 import {
@@ -80,8 +82,6 @@ import {
  * Valid targets for reading back data to the CPU.
  */
 export type ReadTarget = Node | Buffer | RawBuffer | Handle;
-
-type BindableResource = Buffer | RawBuffer | Uniform;
 
 function dispatchNeedsBoundsGuard(
     bounds: [number, number, number],
@@ -297,90 +297,6 @@ export class VoltenContext {
         });
     }
 
-    /**
-     * Resolve a binding value to its concrete Buffer or RawBuffer.
-     * - Buffer / RawBuffer → returns self
-     * - Handle → recursively walks up the Handle chain to find the actual buffer
-     */
-    private _resolveConcreteBuffer(
-        value: Buffer | RawBuffer | Handle
-    ): Buffer | RawBuffer {
-        if (value instanceof Buffer || value instanceof RawBuffer) {
-            return value;
-        }
-        if (isHandle(value)) {
-            // Recursively resolve: the source node's binding for this name
-            // may itself be a Handle (multi-level chaining)
-            const sourceBinding = value._node._bindings[value._name];
-            return this._resolveConcreteBuffer(
-                sourceBinding as Buffer | RawBuffer | Handle
-            );
-        }
-        throw new Error(
-            `Volten Error: Cannot resolve concrete buffer from binding of type ${typeof value}.`
-        );
-    }
-
-    private _resolveBindableResource(
-        value: Buffer | RawBuffer | Uniform | Handle
-    ): BindableResource {
-        if (
-            value instanceof Buffer ||
-            value instanceof RawBuffer ||
-            value instanceof Uniform
-        ) {
-            return value;
-        }
-        if (isHandle(value)) {
-            const sourceBinding = value._node._bindings[value._name];
-            return this._resolveBindableResource(
-                sourceBinding as Buffer | RawBuffer | Uniform | Handle
-            );
-        }
-        throw new Error(
-            `Volten Error: Cannot resolve bindable resource from binding of type ${typeof value}.`
-        );
-    }
-
-    private _getOrCreateBindGroup(node: Node): GPUBindGroup {
-        const entries: GPUBindGroupEntry[] = [];
-        const cacheParts: string[] = [];
-
-        for (const entry of node._bindingEntries) {
-            const resource = this._resolveBindableResource(entry.source);
-            const gpuBuffer = resource.ensure(this.device);
-
-            cacheParts.push(
-                `${entry.index}:${resource._resourceId}:${resource._gpuResourceVersion}`
-            );
-            entries.push({
-                binding: entry.index,
-                resource: {
-                    buffer: gpuBuffer
-                }
-            });
-        }
-
-        const cacheKey = cacheParts.join('|');
-        const cached = node._cachedBindGroup;
-        if (cached && cached.key === cacheKey) {
-            return cached.bindGroup;
-        }
-
-        const bindGroup = this.device.createBindGroup({
-            label: `${node._label} bind group`,
-            layout: node._bindGroupLayout,
-            entries
-        });
-
-        node._cachedBindGroup = {
-            key: cacheKey,
-            bindGroup
-        };
-
-        return bindGroup;
-    }
-
     // -----------------------------------------------------------------------
     // Compile → Submit pipeline
     // -----------------------------------------------------------------------
@@ -437,7 +353,7 @@ export class VoltenContext {
                 node._debug.resource.reset(this.device);
             }
 
-            const bindGroup = this._getOrCreateBindGroup(node);
+            const bindGroup = getOrCreateNodeBindGroup(this.device, node);
 
             // Check for dependencies within the current pass
             let dependsOnCurrentPass = false;
@@ -646,7 +562,7 @@ export class VoltenContext {
 
         for (const t of targets) {
             if (t instanceof Buffer || t instanceof RawBuffer || isHandle(t)) {
-                const concrete = this._resolveConcreteBuffer(t);
+                const concrete = resolveReadBuffer(t);
                 uniqueBuffers.set(concrete, {
                     staging: null!,
                     size: concrete.byteLength
@@ -669,7 +585,7 @@ export class VoltenContext {
                 }[] = [];
                 for (const name of outputNames) {
                     const handle = nodeOutputs[name];
-                    const concrete = this._resolveConcreteBuffer(handle);
+                    const concrete = resolveReadBuffer(handle);
                     uniqueBuffers.set(concrete, {
                         staging: null!,
                         size: concrete.byteLength
@@ -728,4 +644,16 @@ export class VoltenContext {
             node._debug.resource.bufferSize
         );
     }
+}
+
+function resolveReadBuffer(
+    value: Buffer | RawBuffer | Handle
+): Buffer | RawBuffer {
+    const concrete = resolveConcreteBuffer(value);
+    if (concrete) {
+        return concrete;
+    }
+    throw new Error(
+        `Volten Error: Cannot resolve concrete buffer from read target of type ${typeof value}.`
+    );
 }
