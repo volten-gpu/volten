@@ -5,6 +5,7 @@ import type { Kernel } from '../kernel/kernel.js';
 import type { BindingEntry } from '../kernel/bindings.js';
 import { Buffer } from '../data/buffer.js';
 import { RawBuffer } from '../data/raw-buffer.js';
+import type { NodeDebugState } from '../debug/resource.js';
 
 /**
  * Handle to a buffer output from a compute pass.
@@ -83,7 +84,9 @@ export const RESERVED_NODE_PROPERTIES = [
     '_dispatch',
     '_bindings',
     '_shaderCode',
-    '_label'
+    '_label',
+    '_cachedBindGroup',
+    '_debug'
 ] as const;
 
 /**
@@ -95,6 +98,11 @@ export const RESERVED_NODE_PROPERTIES = [
  */
 export interface NodeOwnedResource {
     destroy(): void;
+}
+
+export interface CachedNodeBindGroup {
+    readonly key: string;
+    readonly bindGroup: GPUBindGroup;
 }
 
 /**
@@ -144,6 +152,10 @@ export interface NodeBase {
     readonly _bindings: Readonly<Record<string, unknown>>;
     /** Full assembled shader code (for debugging) */
     readonly _shaderCode: string;
+    /** Cached bind group for repeated executions of this node. */
+    _cachedBindGroup?: CachedNodeBindGroup | null;
+    /** Optional internal shader-debug state for this node */
+    readonly _debug: NodeDebugState | null;
 }
 
 /**
@@ -211,6 +223,7 @@ export interface CreateNodeOptions {
     shaderCode: string;
     dependencies: Node[];
     label?: string;
+    debug?: NodeDebugState | null;
 }
 
 /**
@@ -236,7 +249,8 @@ export function createNode(options: CreateNodeOptions): Node {
         bindings,
         shaderCode,
         dependencies,
-        label
+        label,
+        debug = null
     } = options;
 
     // Create the base node object (mutated to add handles below)
@@ -252,7 +266,9 @@ export function createNode(options: CreateNodeOptions): Node {
         _bounds: Object.freeze(bounds) as readonly [number, number, number],
         _dispatch: Object.freeze(dispatch) as readonly [number, number, number],
         _bindings: Object.freeze(bindings),
-        _shaderCode: shaderCode
+        _shaderCode: shaderCode,
+        _cachedBindGroup: null,
+        _debug: debug
     };
 
     // Create and spread handles for ALL buffer-like bindings

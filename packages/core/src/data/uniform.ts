@@ -8,6 +8,7 @@ import {
     type UniformLayoutMode
 } from '../utils/uniform-layout.js';
 import { makeLabel } from '../utils/labels.js';
+import { createResourceId } from './resource-identity.js';
 
 export interface UniformOptions {
     /** Optional human-friendly label for debugger/devtools usage. */
@@ -30,6 +31,9 @@ export interface UniformOptions {
  * ], 'mat4x4f');
  */
 export class Uniform {
+    /** Stable identity for bind group caching. */
+    readonly _resourceId = createResourceId();
+
     /** Human-friendly debug label */
     readonly label: string;
 
@@ -47,6 +51,9 @@ export class Uniform {
 
     /** Lazily created GPU buffer */
     private gpuBuffer: GPUBuffer | null = null;
+
+    /** Bumped when the underlying GPUBuffer identity changes. */
+    private gpuResourceVersion = 0;
 
     /** Device used to upload this uniform (captured on first ensure) */
     private device: GPUDevice | null = null;
@@ -80,6 +87,14 @@ export class Uniform {
     }
 
     /**
+     * Version of the underlying GPUBuffer allocation.
+     * Content uploads do not change this; destroy/recreate does.
+     */
+    get _gpuResourceVersion(): number {
+        return this.gpuResourceVersion;
+    }
+
+    /**
      * Current resolved uniform packing mode for this instance.
      */
     get resolvedLayoutMode(): UniformLayoutMode {
@@ -87,15 +102,22 @@ export class Uniform {
     }
 
     /**
-     * Set packing mode. Used by VoltenContext to keep CPU packing in sync
+     * Bind packing mode. Used by VoltenContext to keep CPU packing in sync
      * with generated WGSL layout strategy.
      */
     setLayoutMode(mode: UniformLayoutMode): void {
         if (mode === this.layoutMode) {
             return;
         }
+        if (this.gpuBuffer) {
+            throw new Error(
+                `Volten Error: Uniform "${this.label}" was already uploaded with ${this.layoutMode} layout, ` +
+                    `but this context requires ${mode} layout.\n` +
+                    '  Create a separate Uniform for contexts with different uniform layout modes.'
+            );
+        }
         this.layoutMode = mode;
-        this.repackAndUploadIfNeeded();
+        this.packedData = this.packOne(this.value);
     }
 
     /**
@@ -123,8 +145,21 @@ export class Uniform {
      * the local packed bytes and the first ensure() will upload them.
      */
     set(data: unknown): void {
+        const packedData = this.packOne(data);
+        if (packedData.byteLength !== this.byteLength) {
+            throw new Error(
+                `Volten Error: Uniform "${this.label}" update changed packed byte length ` +
+                    `from ${this.byteLength} to ${packedData.byteLength} bytes.\n` +
+                    '  Uniform.set() can update contents, but it cannot resize the underlying GPU buffer.'
+            );
+        }
+
         this.value = data;
-        this.repackAndUploadIfNeeded();
+        this.packedData = packedData;
+
+        if (this.gpuBuffer && this.device) {
+            this.device.queue.writeBuffer(this.gpuBuffer, 0, this.packedData);
+        }
     }
 
     /**
@@ -153,6 +188,7 @@ export class Uniform {
         if (this.gpuBuffer) {
             this.gpuBuffer.destroy();
             this.gpuBuffer = null;
+            this.gpuResourceVersion++;
         }
     }
 
@@ -163,23 +199,6 @@ export class Uniform {
         return pack([data], this.type, {
             layoutRules: getUniformPackingLayoutRules(this.layoutMode)
         });
-    }
-
-    private repackAndUploadIfNeeded(): void {
-        const previousByteLength = this.byteLength;
-        this.packedData = this.packOne(this.value);
-
-        if (!this.gpuBuffer || !this.device) {
-            return;
-        }
-
-        if (this.byteLength !== previousByteLength) {
-            this.gpuBuffer.destroy();
-            this.gpuBuffer = this.createAndUpload(this.device);
-            return;
-        }
-
-        this.device.queue.writeBuffer(this.gpuBuffer, 0, this.packedData);
     }
 
     private createAndUpload(device: GPUDevice): GPUBuffer {

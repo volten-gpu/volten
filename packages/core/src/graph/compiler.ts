@@ -12,7 +12,7 @@
 //
 //   v.run(D, E, F)
 //
-// each terminal (by terminal node we refer to D, E, F in the example) might be the tip of its own subtree. 
+// each terminal (by terminal node we refer to D, E, F in the example) might be the tip of its own subtree.
 // Some subtrees may share concrete buffers without any Handle-based connection:
 //
 //   let E = v.pass(k2, { inout });          // uses buffer "inout"
@@ -59,9 +59,10 @@
 
 import type { Node } from './node.js';
 import { collectNodes, topologicalSort } from './scheduler.js';
-import { Buffer } from '../data/buffer.js';
-import { RawBuffer } from '../data/raw-buffer.js';
-import { isHandle, type Handle } from './node.js';
+import { resolveConcreteBuffer } from '../kernel/resource-resolution.js';
+import type { Buffer } from '../data/buffer.js';
+import type { RawBuffer } from '../data/raw-buffer.js';
+export { resolveConcreteBuffer } from '../kernel/resource-resolution.js';
 
 /**
  * The output of the compile step. Contains a sorted list of nodes
@@ -70,33 +71,6 @@ import { isHandle, type Handle } from './node.js';
 export interface ExecutionPlan {
     /** Nodes in topological (execution) order. */
     readonly sorted: readonly Node[];
-}
-
-/**
- * Walk a Handle chain to find the root Buffer or RawBuffer.
- *
- * Returns null if the binding is not buffer-like (e.g., a scalar uniform
- * that was somehow passed through, or a future PoolSlot placeholder).
- *
- * @example
- * ```
- * // A = v.pass(k, { in: buf, out: outBuf })
- * // B = v.pass(k, { in: A.out })
- *
- * resolveConcreteBuffer(buf)    // → buf (Buffer)
- * resolveConcreteBuffer(A.out)  // → outBuf (Buffer) — walks A._bindings['out']
- * resolveConcreteBuffer(B.in)   // → outBuf (Buffer) — walks B._bindings['in'] → A.out → outBuf
- * ```
- */
-export function resolveConcreteBuffer(value: unknown): Buffer | RawBuffer | null {
-    if (value instanceof Buffer || value instanceof RawBuffer) {
-        return value;
-    }
-    if (isHandle(value)) {
-        const parentBinding = value._node._bindings[value._name];
-        return resolveConcreteBuffer(parentBinding);
-    }
-    return null;
 }
 
 /**
@@ -147,7 +121,7 @@ export function compile(terminals: Node[]): ExecutionPlan {
     // dispatches, because we would risk Read-Write conflicts, this is the reason why this function exists,
     // it tries to find the implicit dependencies based on which buffers are being used by which node.
     // when it finds these dependencies, it will inject synthetic graph-dependencies and only then we run
-    // the topological sort 
+    // the topological sort
 
     if (terminals.length === 0) {
         throw new Error(
@@ -200,7 +174,11 @@ export function compile(terminals: Node[]): ExecutionPlan {
     */
     const isExclusive = (nodeId: symbol, terminalIndex: number): boolean => {
         const owners = nodeOwnership.get(nodeId);
-        return owners !== undefined && owners.size === 1 && owners.has(terminalIndex);
+        return (
+            owners !== undefined &&
+            owners.size === 1 &&
+            owners.has(terminalIndex)
+        );
     };
 
     // -----------------------------------------------------------------------
@@ -251,7 +229,9 @@ export function compile(terminals: Node[]): ExecutionPlan {
             // Use finalTerminals (not originals) so chained synthetic deps
             // compose correctly: if G depends on F and F depends on E,
             // G's dep must point to the wrapped F that already includes E.
-            const extraDeps = [...syntheticDeps[i]].map(j => finalTerminals[j]);
+            const extraDeps = [...syntheticDeps[i]].map(
+                (j) => finalTerminals[j]
+            );
             const original = terminals[i];
             const wrappedDeps = [...original._dependencies, ...extraDeps];
 

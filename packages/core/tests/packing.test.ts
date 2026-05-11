@@ -48,13 +48,6 @@ function readInts(buffer: ArrayBuffer, count: number): number[] {
     return Array.from(view.slice(0, count));
 }
 
-/**
- * Helper to read raw bytes from packed buffer
- */
-function readBytes(buffer: ArrayBuffer): number[] {
-    return Array.from(new Uint8Array(buffer));
-}
-
 function getStorageStructLayout(
     schema: ReturnType<typeof struct>
 ): StructLayout {

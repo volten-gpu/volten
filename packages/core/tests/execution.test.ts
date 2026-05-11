@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { VoltenContext } from '../src/context.js';
 import { Kernel } from '../src/kernel/kernel.js';
 import { Buffer } from '../src/data/buffer.js';
+import { RawBuffer } from '../src/data/raw-buffer.js';
 import { Uniform } from '../src/data/uniform.js';
 
 // Mock WebGPU globals for Node.js environment
@@ -287,6 +288,116 @@ fn main(gid: vec3u) {
         expect(mockWriteBuffer).toHaveBeenCalledTimes(1);
     });
 
+    it('Buffer.set() and update() push updates after upload', () => {
+        const buffer = new Buffer([1, 2, 3], 'f32');
+
+        buffer.set([4, 5, 6]);
+        expect(mockWriteBuffer).not.toHaveBeenCalled();
+        expect(Array.from(new Float32Array(buffer.rawData))).toEqual([4, 5, 6]);
+
+        buffer.ensure(mockDevice);
+        buffer.update([9], 1);
+
+        expect(mockWriteBuffer).toHaveBeenCalledTimes(1);
+        expect(mockWriteBuffer.mock.calls[0][1]).toBe(4);
+        expect(Array.from(new Float32Array(buffer.rawData))).toEqual([4, 9, 6]);
+    });
+
+    it('Buffer.set() rejects element count changes', () => {
+        const buffer = new Buffer([1, 2, 3], 'f32');
+
+        expect(() => buffer.set([1, 2])).toThrow(
+            /cannot resize the underlying GPU buffer/
+        );
+    });
+
+    it('RawBuffer.set() and update() push byte updates after upload', () => {
+        const raw = new RawBuffer(new Uint32Array([1, 2]).buffer, 'array<u32>');
+
+        raw.set(new Uint32Array([3, 4]));
+        expect(mockWriteBuffer).not.toHaveBeenCalled();
+        expect(Array.from(new Uint32Array(raw.rawData))).toEqual([3, 4]);
+
+        raw.ensure(mockDevice);
+        raw.update(new Uint32Array([9]), 4);
+
+        expect(mockWriteBuffer).toHaveBeenCalledTimes(1);
+        expect(mockWriteBuffer.mock.calls[0][1]).toBe(4);
+        expect(Array.from(new Uint32Array(raw.rawData))).toEqual([3, 9]);
+    });
+
+    it('RawBuffer.set() rejects byte length changes', () => {
+        const raw = new RawBuffer(new Uint32Array([1, 2]).buffer, 'array<u32>');
+
+        expect(() => raw.set(new Uint32Array([1, 2, 3]))).toThrow(
+            /cannot resize the underlying GPU buffer/
+        );
+    });
+
+    it('reuses a node bind group across repeated runs', () => {
+        const data = new Buffer([1], 'f32');
+        const K = new Kernel('fn main() {}', {
+            threads: 1,
+            unsafeManualBounds: true
+        });
+        const node = v.pass(K, { data });
+
+        v.run(node);
+        v.run(node);
+
+        expect(mockCreateBindGroup).toHaveBeenCalledTimes(1);
+        expect(mockPassSetBindGroup).toHaveBeenCalledTimes(2);
+        expect(mockPassDispatch).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps the cached bind group after a same-size Uniform.set()', () => {
+        const params = new Uniform(1.0, 'f32');
+        const K = new Kernel('fn main() {}', {
+            threads: 1,
+            unsafeManualBounds: true
+        });
+        const node = v.pass(K, { params });
+
+        v.run(node);
+        params.set(2.0);
+        v.run(node);
+
+        expect(mockWriteBuffer).toHaveBeenCalledTimes(1);
+        expect(mockCreateBindGroup).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the cached bind group after a same-size Buffer.set()', () => {
+        const data = new Buffer([1], 'f32');
+        const K = new Kernel('fn main() {}', {
+            threads: 1,
+            unsafeManualBounds: true
+        });
+        const node = v.pass(K, { data });
+
+        v.run(node);
+        data.set([2]);
+        v.run(node);
+
+        expect(mockWriteBuffer).toHaveBeenCalledTimes(1);
+        expect(mockCreateBindGroup).toHaveBeenCalledTimes(1);
+    });
+
+    it('recreates a cached bind group after the GPU buffer changes', () => {
+        const data = new Buffer([1], 'f32');
+        const K = new Kernel('fn main() {}', {
+            threads: 1,
+            unsafeManualBounds: true
+        });
+        const node = v.pass(K, { data });
+
+        v.run(node);
+        data.destroy();
+        v.run(node);
+
+        expect(mockDestroy).toHaveBeenCalledTimes(1);
+        expect(mockCreateBindGroup).toHaveBeenCalledTimes(2);
+    });
+
     it('v.destroy() recursively destroys only Volten-owned internal resources', () => {
         const input = new Buffer([1], 'f32');
         const mid = new Buffer([0], 'f32');
@@ -332,16 +443,20 @@ fn main(gid: vec3u) {
 
     it('v.destroy() allows reruns by recreating internal bounds resources', () => {
         const input = new Buffer([1, 2, 3], 'f32');
-        const K = new Kernel('fn main(gid: vec3u) { data[gid.x] = data[gid.x]; }', {
-            threads: 3
-        });
+        const K = new Kernel(
+            'fn main(gid: vec3u) { data[gid.x] = data[gid.x]; }',
+            {
+                threads: 3
+            }
+        );
         const node = v.pass(K, { data: input });
 
         v.run(node);
 
-        const initialUniformBufferCreations = mockCreateBuffer.mock.calls.filter(
-            (call) => (call[0].usage & GPUBufferUsage.UNIFORM) !== 0
-        ).length;
+        const initialUniformBufferCreations =
+            mockCreateBuffer.mock.calls.filter(
+                (call) => (call[0].usage & GPUBufferUsage.UNIFORM) !== 0
+            ).length;
 
         expect(initialUniformBufferCreations).toBe(1);
 
@@ -354,5 +469,6 @@ fn main(gid: vec3u) {
 
         expect(mockDestroy).toHaveBeenCalledTimes(1);
         expect(totalUniformBufferCreations).toBe(2);
+        expect(mockCreateBindGroup).toHaveBeenCalledTimes(2);
     });
 });

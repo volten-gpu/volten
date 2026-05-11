@@ -4,7 +4,7 @@
 import { Buffer } from '../data/buffer.js';
 import { RawBuffer } from '../data/raw-buffer.js';
 import { Uniform } from '../data/uniform.js';
-import { resolveConcreteBuffer } from '../graph/compiler.js';
+import { resolveConcreteBuffer } from './resource-resolution.js';
 import { type Handle, isHandle } from '../graph/node.js';
 import type { TypeDescriptor } from '../types/schema.js';
 import {
@@ -102,7 +102,7 @@ function resolveHandleSource(handle: Handle): {
 }
 
 /**
- * Generate binding entries from user-provided bindings and kernel definition.
+ * Generate binding entries from user-provided bindings.
  *
  * Classification rules:
  * - Buffer → var<storage, read|read_write> based on buffer.access
@@ -111,12 +111,10 @@ function resolveHandleSource(handle: Handle): {
  * - Anything else → throws an error
  *
  * @param bindings - User-provided bindings record
- * @param kernel - The kernel definition
  * @returns Array of classified binding entries
  */
 export function generateBindings(
     bindings: Record<string, unknown>,
-    kernel: Kernel,
     options?: { uniformLayoutMode?: UniformLayoutMode }
 ): BindingEntry[] {
     const entries: BindingEntry[] = [];
@@ -210,24 +208,23 @@ export function generateBindingWgsl(entries: BindingEntry[]): string {
 }
 
 /**
- * Assemble the full shader source: binding declarations + kernel source.
- *
- * The binding WGSL is prepended to the kernel's assembled source (which already
- * has builtin shorthands expanded and @compute/@workgroup_size injected).
+ * Assemble the full shader source around an already-prepared kernel source.
  *
  * `assembleFullShader` is thus responsible for pass-time composition:
  * type declarations, binding declarations, optional extension lines.
  *
- * @param kernel - The kernel definition
  * @param entries - Classified binding entries
  * @returns Complete WGSL shader source ready for pipeline creation
  */
 export function assembleFullShader(
-    kernel: Kernel,
     entries: BindingEntry[],
-    options?: { uniformLayoutMode?: UniformLayoutMode }
+    options: {
+        uniformLayoutMode?: UniformLayoutMode;
+        kernelSource: string;
+        additionalSections?: string[];
+    }
 ): string {
-    const uniformLayoutMode = options?.uniformLayoutMode ?? 'classic';
+    const uniformLayoutMode = options.uniformLayoutMode ?? 'classic';
     const bindingTypeInfo: BindingTypeInfo[] = entries.map((entry) => ({
         name: entry.name,
         wgslAddressSpace: entry.wgslAddressSpace,
@@ -241,9 +238,15 @@ export function assembleFullShader(
     const requiresUniformStandardLayout =
         uniformLayoutMode === 'standard' &&
         entries.some((entry) => entry.wgslAddressSpace === 'uniform');
-    const kernelSource = kernel.assembledSource;
+    const kernelSource = options.kernelSource;
+    const additionalSections = options.additionalSections ?? [];
 
-    if (!bindingWgsl && !typeDeclarations && !requiresUniformStandardLayout) {
+    if (
+        !bindingWgsl &&
+        !typeDeclarations &&
+        !requiresUniformStandardLayout &&
+        additionalSections.length === 0
+    ) {
         return kernelSource;
     }
 
@@ -254,6 +257,7 @@ export function assembleFullShader(
     if (typeDeclarations) {
         sections.push(typeDeclarations);
     }
+    sections.push(...additionalSections.filter(Boolean));
     if (bindingWgsl) {
         sections.push(bindingWgsl);
     }
@@ -394,20 +398,6 @@ function getBindingCount(value: unknown, name: string): number {
         `Volten Error: Cannot infer thread count from binding "${name}" — ` +
             `it is not a Buffer.`
     );
-}
-
-/**
- * Convert a 1D total thread count to workgroup dispatch dimensions.
- * Equivalent to threadsToDispatch3D([totalThreads, 1, 1], workgroupSize).
- *
- * Scalar threads are treated identically to [N, 1, 1] — all dispatch
- * paths use per-axis division for a single, consistent mental model.
- */
-function threadsToDispatch(
-    totalThreads: number,
-    workgroupSize: [number, number, number]
-): [number, number, number] {
-    return threadsToDispatch3D([totalThreads, 1, 1], workgroupSize);
 }
 
 /**

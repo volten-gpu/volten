@@ -1,4 +1,9 @@
 import { WGSL_TYPE_ALIASES } from '../types/primitives.js';
+import {
+    findFunctionSignature,
+    splitTopLevelCommaList,
+    type FunctionSignatureMatch
+} from './wgsl-source.js';
 
 /**
  * Builtin shorthand expansion for compute shader entry points.
@@ -31,15 +36,12 @@ export const BUILTIN_SHORTHANDS: Record<
 };
 
 /** Hidden uniform name injected by Volten for guarded dispatch bounds. */
-export const VOLTEN_INTERNAL_BOUNDS_NAME =
-    '_volten_internal_dispatch_bounds_guard_uniform';
+export const VOLTEN_BOUNDS_NAME =
+    '_volten_dispatch_bounds_guard_uniform';
 
-const VOLTEN_INTERNAL_USER_MAIN_NAME =
-    '_volten_internal_user_main_entrypoint_wrapper';
-const VOLTEN_INTERNAL_GID_NAME = '_volten_internal_guard_gid_builtin';
-
-/** Regex to find the start of the main function signature. */
-const MAIN_FN_START_REGEX = /fn\s+main\s*\(/;
+const VOLTEN_USER_MAIN_NAME =
+    '_volten_user_main_entrypoint_wrapper';
+const VOLTEN_GID_NAME = '_volten_guard_gid_builtin';
 
 interface ParsedParameter {
     readonly original: string;
@@ -48,15 +50,11 @@ interface ParsedParameter {
     readonly builtin?: string;
 }
 
-interface MainFunctionMatch {
-    readonly signatureStart: number;
-    readonly paramsStart: number;
-    readonly paramsEnd: number;
-    readonly params: string;
-}
+export type EntryPointSetup = string | ((gidName: string) => string);
 
 interface FinalizeComputeEntryPointOptions {
-    readonly guarded?: boolean;
+    readonly boundsGuard?: boolean;
+    readonly beforeUserMain?: readonly EntryPointSetup[];
 }
 
 /**
@@ -69,34 +67,8 @@ function normalizeType(type: string): string {
     return WGSL_TYPE_ALIASES[stripped] ?? stripped;
 }
 
-function findMainFunction(source: string): MainFunctionMatch | null {
-    const match = MAIN_FN_START_REGEX.exec(source);
-    if (!match) {
-        return null;
-    }
-
-    const signatureStart = match.index;
-    const paramsStart = signatureStart + match[0].length;
-    let depth = 1;
-
-    for (let i = paramsStart; i < source.length; i++) {
-        const char = source[i];
-        if (char === '(') {
-            depth++;
-        } else if (char === ')') {
-            depth--;
-            if (depth === 0) {
-                return {
-                    signatureStart,
-                    paramsStart,
-                    paramsEnd: i,
-                    params: source.slice(paramsStart, i)
-                };
-            }
-        }
-    }
-
-    return null;
+function findMainFunction(source: string): FunctionSignatureMatch | null {
+    return findFunctionSignature(source, 'main');
 }
 
 /**
@@ -149,8 +121,7 @@ export function expandParameter(paramStr: string): string {
 export function expandParameterList(params: string): string {
     if (!params.trim()) return params;
 
-    return params
-        .split(',')
+    return splitTopLevelCommaList(params)
         .map((p) => expandParameter(p))
         .join(', ');
 }
@@ -203,7 +174,7 @@ function parseParameterList(params: string): ParsedParameter[] {
         return [];
     }
 
-    return params.split(',').map((p) => parseParameter(p));
+    return splitTopLevelCommaList(params).map((p) => parseParameter(p));
 }
 
 function formatComputeDecorators(
@@ -213,12 +184,43 @@ function formatComputeDecorators(
     return `@compute @workgroup_size(${x}, ${y}, ${z})\n`;
 }
 
+function indentWgslBlock(source: string): string {
+    return source
+        .trim()
+        .split('\n')
+        .map((line) => `    ${line}`)
+        .join('\n');
+}
+
+function formatBoundsGuard(
+    enabled: boolean | undefined,
+    gidName: string
+): string {
+    if (!enabled) {
+        return '';
+    }
+
+    return `    if (any(${gidName} >= ${VOLTEN_BOUNDS_NAME}.xyz)) {
+        return;
+    }`;
+}
+
+function formatEntryPointSetup(
+    setup: readonly EntryPointSetup[],
+    gidName: string
+): string {
+    return setup
+        .map((entry) => (typeof entry === 'function' ? entry(gidName) : entry))
+        .filter((entry) => entry.trim().length > 0)
+        .map((entry) => indentWgslBlock(entry))
+        .join('\n');
+}
+
 /**
  * Finalize the compute entry point after shorthand expansion.
  *
- * In unguarded mode, this simply decorates the user's main function.
- * In guarded mode, it rewrites the user's main into a helper and emits
- * a wrapped compute entry point that clamps over-dispatched invocations.
+ * If wrapping is needed, this renames the user's main into a helper and emits
+ * the real compute entry point with optional bounds/setup code.
  */
 function finalizeComputeEntryPoint(
     source: string,
@@ -231,7 +233,13 @@ function finalizeComputeEntryPoint(
     }
 
     const decorators = formatComputeDecorators(workgroupSize);
-    if (!options?.guarded) {
+    const beforeUserMain = options?.beforeUserMain ?? [];
+    const setupNeedsGid = beforeUserMain.some(
+        (entry) => typeof entry === 'function'
+    );
+    const needsWrapper = options?.boundsGuard || beforeUserMain.length > 0;
+
+    if (!needsWrapper) {
         return (
             source.slice(0, main.signatureStart) +
             decorators +
@@ -252,11 +260,14 @@ function finalizeComputeEntryPoint(
     const existingGid = parsedParams.find(
         (param) => param.builtin === 'global_invocation_id'
     );
-    const guardGidName = existingGid?.name ?? VOLTEN_INTERNAL_GID_NAME;
+    const guardGidName = existingGid?.name ?? VOLTEN_GID_NAME;
     const entryParams = parsedParams.map((param) => param.original);
-    if (!existingGid) {
+    const needsInjectedGid =
+        !existingGid && (options?.boundsGuard || setupNeedsGid);
+
+    if (needsInjectedGid) {
         entryParams.push(
-            `@builtin(global_invocation_id) ${VOLTEN_INTERNAL_GID_NAME}: vec3<u32>`
+            `@builtin(global_invocation_id) ${VOLTEN_GID_NAME}: vec3<u32>`
         );
     }
 
@@ -272,48 +283,56 @@ function finalizeComputeEntryPoint(
         renamedSource goes from:
             fn main(gid: vec3u) {
         to:
-            fn _volten_internal_user_main_entrypoint_wrapper(gid: vec3u) {
+            fn _volten_user_main_entrypoint_wrapper(gid: vec3u) {
     */
     const renamedSource =
         source.slice(0, main.signatureStart) +
-        `fn ${VOLTEN_INTERNAL_USER_MAIN_NAME}(${helperParams})` +
+        `fn ${VOLTEN_USER_MAIN_NAME}(${helperParams})` +
         source.slice(main.paramsEnd + 1);
 
     const userArgs = parsedParams.map((param) => param.name).join(', ');
 
     // shader part that calls the wrapper function with the
     // provided arguments:
-    // e.g.: callLine = "_volten_internal_user_main_entrypoint_wrapper(gid);"
+    // e.g.: callLine = "_volten_user_main_entrypoint_wrapper(gid);"
     const callLine =
         userArgs.length > 0
-            ? `${VOLTEN_INTERNAL_USER_MAIN_NAME}(${userArgs});`
-            : `${VOLTEN_INTERNAL_USER_MAIN_NAME}();`;
+            ? `${VOLTEN_USER_MAIN_NAME}(${userArgs});`
+            : `${VOLTEN_USER_MAIN_NAME}();`;
 
-    const guardedEntryPoint = `${decorators}fn main(${entryParams.join(', ')}) {
-    if (any(${guardGidName} >= ${VOLTEN_INTERNAL_BOUNDS_NAME}.xyz)) {
-        return;
-    }
-    ${callLine}
-}`;
+    const guardBlock = formatBoundsGuard(options?.boundsGuard, guardGidName);
+    const setupBlock = formatEntryPointSetup(beforeUserMain, guardGidName);
+    const entryPoint = [
+        `${decorators}fn main(${entryParams.join(', ')}) {`,
+        guardBlock,
+        setupBlock,
+        `    ${callLine}`,
+        '}'
+    ]
+        .filter((section) => section.length > 0)
+        .join('\n');
 
-    return `${renamedSource}\n\n${guardedEntryPoint}`;
+    return `${renamedSource}\n\n${entryPoint}`;
 }
 
 /**
- * Process shader source: expand shorthands and inject decorators.
- * This is the main entry point for shader source transformation.
+ * Finalize kernel WGSL after optional shader transforms have run.
  *
  * @param source - The WGSL shader source
  * @param workgroupSize - The workgroup size
  * @returns Fully processed shader source
  */
-export function processShaderSource(
+export function finalizeKernelSource(
     source: string,
     workgroupSize: [number, number, number] = [64, 1, 1],
-    options?: { unsafeManualBounds?: boolean }
+    options?: {
+        unsafeManualBounds?: boolean;
+        beforeUserMain?: readonly EntryPointSetup[];
+    }
 ): string {
     const expanded = expandBuiltinShorthands(source);
     return finalizeComputeEntryPoint(expanded, workgroupSize, {
-        guarded: !options?.unsafeManualBounds
+        boundsGuard: !options?.unsafeManualBounds,
+        beforeUserMain: options?.beforeUserMain
     });
 }

@@ -19,7 +19,8 @@ import {
     resolveDispatch
 } from '../src/kernel/bindings.js';
 import { Kernel } from '../src/kernel/kernel.js';
-import { VOLTEN_INTERNAL_BOUNDS_NAME } from '../src/kernel/builtins.js';
+import { prepareKernelShader } from '../src/kernel/shader.js';
+import { VOLTEN_BOUNDS_NAME } from '../src/kernel/builtins.js';
 import { Buffer } from '../src/data/buffer.js';
 import { RawBuffer } from '../src/data/raw-buffer.js';
 import { Uniform } from '../src/data/uniform.js';
@@ -30,8 +31,7 @@ import {
     validateOutputName,
     getNodeOutputs,
     isBufferLike,
-    type Handle,
-    type Node
+    type Handle
 } from '../src/graph/node.js';
 import { PipelineCache } from '../src/graph/pipeline-cache.js';
 import { VoltenContext } from '../src/context.js';
@@ -47,6 +47,20 @@ function makeBuffer(
     access: 'r' | 'rw' = 'r'
 ): Buffer {
     return new Buffer(data, type as any, access);
+}
+
+function assembleKernelShader(
+    kernel: Kernel,
+    entries: ReturnType<typeof generateBindings>,
+    options?: {
+        uniformLayoutMode?: 'classic' | 'standard';
+    }
+): string {
+    const prepared = prepareKernelShader(kernel);
+    return assembleFullShader(entries, {
+        ...options,
+        kernelSource: prepared.kernelSource
+    });
 }
 
 function makeRawBuffer(
@@ -83,9 +97,8 @@ function makeMockHandle(name: string = 'output'): Handle {
 describe('Binding Generation', () => {
     describe('generateBindings()', () => {
         it('classifies a read-only Buffer binding', () => {
-            const kernel = new Kernel('fn main() { }');
             const buf = makeBuffer([1, 2, 3], 'f32', 'r');
-            const entries = generateBindings({ input: buf }, kernel);
+            const entries = generateBindings({ input: buf });
 
             expect(entries).toHaveLength(1);
             expect(entries[0].index).toBe(0);
@@ -96,17 +109,15 @@ describe('Binding Generation', () => {
         });
 
         it('classifies a read-write Buffer binding', () => {
-            const kernel = new Kernel('fn main() { }');
             const buf = makeBuffer([1, 2, 3], 'f32', 'rw');
-            const entries = generateBindings({ output: buf }, kernel);
+            const entries = generateBindings({ output: buf });
 
             expect(entries[0].wgslAccess).toBe('read_write');
         });
 
         it('classifies a RawBuffer binding', () => {
-            const kernel = new Kernel('fn main() { }');
             const raw = makeRawBuffer(64, 'array<vec4f>');
-            const entries = generateBindings({ data: raw }, kernel);
+            const entries = generateBindings({ data: raw });
 
             expect(entries).toHaveLength(1);
             expect(entries[0].name).toBe('data');
@@ -115,9 +126,8 @@ describe('Binding Generation', () => {
         });
 
         it('classifies a Uniform binding', () => {
-            const kernel = new Kernel('fn main() { }');
             const uniform = makeUniform([1, 2, 3, 4], 'vec4f');
-            const entries = generateBindings({ transform: uniform }, kernel);
+            const entries = generateBindings({ transform: uniform });
 
             expect(entries).toHaveLength(1);
             expect(entries[0].name).toBe('transform');
@@ -128,9 +138,8 @@ describe('Binding Generation', () => {
         });
 
         it('classifies a Handle binding with resolved type from source', () => {
-            const kernel = new Kernel('fn main() { }');
             const handle = makeMockHandle('prevOutput');
-            const entries = generateBindings({ prevData: handle }, kernel);
+            const entries = generateBindings({ prevData: handle });
 
             expect(entries).toHaveLength(1);
             expect(entries[0].name).toBe('prevData');
@@ -141,62 +150,34 @@ describe('Binding Generation', () => {
         });
 
         it('assigns sequential binding indices', () => {
-            const kernel = new Kernel('fn main() { }');
             const a = makeBuffer([1], 'f32', 'r');
             const b = makeBuffer([2], 'f32', 'rw');
             const c = makeRawBuffer(4, 'array<u32>');
 
-            const entries = generateBindings({ a, b, c }, kernel);
+            const entries = generateBindings({ a, b, c });
 
             expect(entries[0].index).toBe(0);
             expect(entries[1].index).toBe(1);
             expect(entries[2].index).toBe(2);
         });
 
-        it('does not throw when kernel outputs are not provided (outputs are optional hints)', () => {
-            const kernel = new Kernel('fn main() { }', {
-                outputs: { result: { definedBy: 'input' } }
-            });
-            const input = makeBuffer([1, 2, 3], 'f32', 'r');
-
-            // Should NOT throw — outputs are purely for future pool allocation
-            const entries = generateBindings({ input }, kernel);
-            expect(entries).toHaveLength(1);
-        });
-
-        it('accepts when kernel output is provided along with its declaration', () => {
-            const kernel = new Kernel('fn main() { }', {
-                outputs: { result: { definedBy: 'input' } }
-            });
-            const input = makeBuffer([1, 2, 3], 'f32', 'r');
-            const result = makeBuffer([0, 0, 0], 'f32', 'rw');
-
-            const entries = generateBindings({ input, result }, kernel);
-            expect(entries).toHaveLength(2);
-        });
-
         it('throws on number binding with helpful hint', () => {
-            const kernel = new Kernel('fn main() { }');
-
-            expect(() =>
-                generateBindings({ scale: 2.5 as any }, kernel)
-            ).toThrow(/Raw scalar bindings are not supported/);
-            expect(() =>
-                generateBindings({ scale: 2.5 as any }, kernel)
-            ).toThrow(/new Buffer/);
+            expect(() => generateBindings({ scale: 2.5 as any })).toThrow(
+                /Raw scalar bindings are not supported/
+            );
+            expect(() => generateBindings({ scale: 2.5 as any })).toThrow(
+                /new Buffer/
+            );
         });
 
         it('throws on unsupported binding type', () => {
-            const kernel = new Kernel('fn main() { }');
-
-            expect(() =>
-                generateBindings({ name: 'hello' as any }, kernel)
-            ).toThrow(/unsupported type/);
+            expect(() => generateBindings({ name: 'hello' as any })).toThrow(
+                /unsupported type/
+            );
         });
 
         it('handles empty bindings with no kernel outputs', () => {
-            const kernel = new Kernel('fn main() { }');
-            const entries = generateBindings({}, kernel);
+            const entries = generateBindings({});
             expect(entries).toHaveLength(0);
         });
     });
@@ -209,9 +190,8 @@ describe('Binding Generation', () => {
 describe('WGSL Binding Declaration Generation', () => {
     describe('generateBindingWgsl()', () => {
         it('generates correct binding declaration for read-only buffer', () => {
-            const kernel = new Kernel('fn main() { }');
             const buf = makeBuffer([1], 'f32', 'r');
-            const entries = generateBindings({ input: buf }, kernel);
+            const entries = generateBindings({ input: buf });
             const wgsl = generateBindingWgsl(entries);
 
             expect(wgsl).toBe(
@@ -220,9 +200,8 @@ describe('WGSL Binding Declaration Generation', () => {
         });
 
         it('generates correct binding declaration for read-write buffer', () => {
-            const kernel = new Kernel('fn main() { }');
             const buf = makeBuffer([1], 'f32', 'rw');
-            const entries = generateBindings({ output: buf }, kernel);
+            const entries = generateBindings({ output: buf });
             const wgsl = generateBindingWgsl(entries);
 
             expect(wgsl).toBe(
@@ -231,10 +210,9 @@ describe('WGSL Binding Declaration Generation', () => {
         });
 
         it('generates multiple binding declarations', () => {
-            const kernel = new Kernel('fn main() { }');
             const input = makeBuffer([1], 'f32', 'r');
             const output = makeBuffer([1], 'f32', 'rw');
-            const entries = generateBindings({ input, output }, kernel);
+            const entries = generateBindings({ input, output });
             const wgsl = generateBindingWgsl(entries);
 
             const lines = wgsl.split('\n');
@@ -250,18 +228,16 @@ describe('WGSL Binding Declaration Generation', () => {
         });
 
         it('generates var<uniform> declaration for Uniform bindings', () => {
-            const kernel = new Kernel('fn main() { }');
             const scale = makeUniform(2.0, 'f32');
-            const entries = generateBindings({ scale }, kernel);
+            const entries = generateBindings({ scale });
             const wgsl = generateBindingWgsl(entries);
 
             expect(wgsl).toBe('@group(0) @binding(0) var<uniform> scale: f32;');
         });
 
         it('handles vec3f buffer type', () => {
-            const kernel = new Kernel('fn main() { }');
             const buf = new Buffer([[1, 2, 3]], 'vec3f' as any, 'r');
-            const entries = generateBindings({ positions: buf }, kernel);
+            const entries = generateBindings({ positions: buf });
             const wgsl = generateBindingWgsl(entries);
 
             expect(wgsl).toContain('array<vec3f>');
@@ -283,8 +259,8 @@ fn main(gid: vec3u) {
 `);
             const input = makeBuffer([1, 2, 3], 'f32', 'r');
             const output = makeBuffer([0, 0, 0], 'f32', 'rw');
-            const entries = generateBindings({ input, output }, kernel);
-            const shader = assembleFullShader(kernel, entries);
+            const entries = generateBindings({ input, output });
+            const shader = assembleKernelShader(kernel, entries);
 
             // Bindings should come before the function
             const bindingPos = shader.indexOf('@group(0)');
@@ -297,16 +273,16 @@ fn main(gid: vec3u) {
             const kernel = new Kernel('fn main(gid: vec3u) { }', {
                 workgroupSize: [128]
             });
-            const entries = generateBindings({}, kernel);
-            const shader = assembleFullShader(kernel, entries);
+            const entries = generateBindings({});
+            const shader = assembleKernelShader(kernel, entries);
 
             expect(shader).toContain('@compute @workgroup_size(128, 1, 1)');
         });
 
         it('includes builtin expansion from kernel assembly', () => {
             const kernel = new Kernel('fn main(gid: vec3u) { }');
-            const entries = generateBindings({}, kernel);
-            const shader = assembleFullShader(kernel, entries);
+            const entries = generateBindings({});
+            const shader = assembleKernelShader(kernel, entries);
 
             expect(shader).toContain(
                 '@builtin(global_invocation_id) gid: vec3u'
@@ -315,10 +291,10 @@ fn main(gid: vec3u) {
 
         it('returns kernel source alone when no bindings', () => {
             const kernel = new Kernel('fn main() { }');
-            const entries = generateBindings({}, kernel);
-            const shader = assembleFullShader(kernel, entries);
+            const entries = generateBindings({});
+            const shader = assembleKernelShader(kernel, entries);
 
-            expect(shader).toBe(kernel.assembledSource);
+            expect(shader).toBe(prepareKernelShader(kernel).kernelSource);
         });
 
         it('auto-emits struct declarations for struct-typed storage bindings', () => {
@@ -327,8 +303,8 @@ fn main(gid: vec3u) {
                 mass: 'f32'
             });
             const particles = new Buffer([{ mass: 1 }], Particle, 'r');
-            const entries = generateBindings({ particles }, kernel);
-            const shader = assembleFullShader(kernel, entries);
+            const entries = generateBindings({ particles });
+            const shader = assembleKernelShader(kernel, entries);
 
             expect(shader).toContain('struct Particle {');
             expect(shader).toContain('mass: f32,');
@@ -345,10 +321,13 @@ fn main(gid: vec3u) {
                 b: 'f32'
             });
             const params = new Uniform({ a: { x: 1 }, b: 2 }, Params);
-            const entries = generateBindings({ params }, kernel, {
-                uniformLayoutMode: 'classic'
-            });
-            const shader = assembleFullShader(kernel, entries, {
+            const entries = generateBindings(
+                { params },
+                {
+                    uniformLayoutMode: 'classic'
+                }
+            );
+            const shader = assembleKernelShader(kernel, entries, {
                 uniformLayoutMode: 'classic'
             });
 
@@ -364,10 +343,13 @@ fn main(gid: vec3u) {
                 b: 'f32'
             });
             const params = new Uniform({ a: { x: 1 }, b: 2 }, Params);
-            const entries = generateBindings({ params }, kernel, {
-                uniformLayoutMode: 'standard'
-            });
-            const shader = assembleFullShader(kernel, entries, {
+            const entries = generateBindings(
+                { params },
+                {
+                    uniformLayoutMode: 'standard'
+                }
+            );
+            const shader = assembleKernelShader(kernel, entries, {
                 uniformLayoutMode: 'standard'
             });
 
@@ -384,12 +366,15 @@ fn main(gid: vec3u) {
                 weights: array('f32', 4)
             });
             const params = new Uniform({ weights: [1, 2, 3, 4] }, Params);
-            const entries = generateBindings({ params }, kernel, {
-                uniformLayoutMode: 'classic'
-            });
+            const entries = generateBindings(
+                { params },
+                {
+                    uniformLayoutMode: 'classic'
+                }
+            );
 
             expect(() =>
-                assembleFullShader(kernel, entries, {
+                assembleKernelShader(kernel, entries, {
                     uniformLayoutMode: 'classic'
                 })
             ).toThrow(/16-byte array stride/);
@@ -413,12 +398,11 @@ fn main(gid: vec3u) {
             );
             const entries = generateBindings(
                 { storageData, uniformData },
-                kernel,
                 { uniformLayoutMode: 'classic' }
             );
 
             expect(() =>
-                assembleFullShader(kernel, entries, {
+                assembleKernelShader(kernel, entries, {
                     uniformLayoutMode: 'classic'
                 })
             ).toThrow(/used by both storage and classic-uniform layouts/);
@@ -478,7 +462,7 @@ describe('Thread Dispatch Resolution', () => {
 
         it('resolves function threads spec', () => {
             const kernel = new Kernel('fn main() { }', {
-                threads: (_data) => [640, 320, 128] as [number, number, number]
+                threads: () => [640, 320, 128] as [number, number, number]
             });
             const dispatch = resolveDispatch(kernel, {});
 
@@ -1241,7 +1225,7 @@ fn main(gid: vec3u) {
             (e) => e.name === 'multiplier'
         );
         const boundsEntry = node._bindingEntries.find(
-            (e) => e.name === VOLTEN_INTERNAL_BOUNDS_NAME
+            (e) => e.name === VOLTEN_BOUNDS_NAME
         );
         expect(uniformEntry).toBeDefined();
         expect(boundsEntry).toBeDefined();
@@ -1251,7 +1235,7 @@ fn main(gid: vec3u) {
         expect(uniformEntry!.wgslType).toBe('f32');
         expect(node._shaderCode).toContain('var<uniform> multiplier: f32;');
         expect(node._shaderCode).toContain(
-            `var<uniform> ${VOLTEN_INTERNAL_BOUNDS_NAME}: vec4u;`
+            `var<uniform> ${VOLTEN_BOUNDS_NAME}: vec4u;`
         );
         expect((node as any).multiplier).toBeUndefined();
     });
@@ -1270,9 +1254,9 @@ fn main(gid: vec3u) {
 
         expect(node._bounds).toEqual([4, 1, 1]);
         expect(node._dispatch).toEqual([1, 1, 1]);
-        expect(node._shaderCode).toContain(VOLTEN_INTERNAL_BOUNDS_NAME);
+        expect(node._shaderCode).toContain(VOLTEN_BOUNDS_NAME);
         expect(node._shaderCode).toContain(
-            '_volten_internal_user_main_entrypoint_wrapper'
+            '_volten_user_main_entrypoint_wrapper'
         );
     });
 
@@ -1290,13 +1274,11 @@ fn main(gid: vec3u) {
         const node = v.pass(kernel, { data: input });
 
         expect(
-            node._bindingEntries.find(
-                (e) => e.name === VOLTEN_INTERNAL_BOUNDS_NAME
-            )
+            node._bindingEntries.find((e) => e.name === VOLTEN_BOUNDS_NAME)
         ).toBeUndefined();
-        expect(node._shaderCode).not.toContain(VOLTEN_INTERNAL_BOUNDS_NAME);
+        expect(node._shaderCode).not.toContain(VOLTEN_BOUNDS_NAME);
         expect(node._shaderCode).not.toContain(
-            '_volten_internal_user_main_entrypoint_wrapper'
+            '_volten_user_main_entrypoint_wrapper'
         );
     });
 

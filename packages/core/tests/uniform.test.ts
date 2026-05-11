@@ -12,7 +12,7 @@ const GPUBufferUsage = {
     UNIFORM: 0x0040,
     STORAGE: 0x0080,
     INDIRECT: 0x0100,
-    QUERY_RESOLVE: 0x0200,
+    QUERY_RESOLVE: 0x0200
 };
 
 (global as any).GPUBufferUsage = GPUBufferUsage;
@@ -27,13 +27,10 @@ describe('Uniform', () => {
     it('supports struct uniforms', () => {
         const Params = struct('Params', {
             offset: 'vec3f',
-            scale: 'f32',
+            scale: 'f32'
         });
 
-        const u = new Uniform(
-            { offset: [1, 2, 3], scale: 4.0 },
-            Params
-        );
+        const u = new Uniform({ offset: [1, 2, 3], scale: 4.0 }, Params);
 
         expect(u.wgslType).toBe('Params');
         expect(u.byteLength).toBe(16);
@@ -58,13 +55,13 @@ describe('Uniform', () => {
 
         const device = {
             queue: {
-                writeBuffer,
+                writeBuffer
             },
             createBuffer: vi.fn().mockReturnValue({
                 getMappedRange,
                 unmap,
-                destroy,
-            }),
+                destroy
+            })
         } as any as GPUDevice;
 
         const u = new Uniform(1.0, 'f32');
@@ -78,7 +75,7 @@ describe('Uniform', () => {
         const S = struct('UniformStdS', { x: 'f32' });
         const Params = struct('UniformStdParams', {
             a: S,
-            b: 'f32',
+            b: 'f32'
         });
 
         const u = new Uniform({ a: { x: 3 }, b: 7 }, Params);
@@ -90,5 +87,35 @@ describe('Uniform', () => {
         const floats = new Float32Array(u.rawData);
         expect(floats[0]).toBe(3);
         expect(floats[1]).toBe(7);
+    });
+
+    it('rejects layout mode changes after upload', () => {
+        const S = struct('UploadedUniformStdS', { x: 'f32' });
+        const Params = struct('UploadedUniformStdParams', {
+            a: S,
+            b: 'f32'
+        });
+        const getMappedRange = vi.fn().mockReturnValue(new ArrayBuffer(32));
+        const unmap = vi.fn();
+        const destroy = vi.fn();
+
+        const device = {
+            queue: {
+                writeBuffer: vi.fn()
+            },
+            createBuffer: vi.fn().mockReturnValue({
+                getMappedRange,
+                unmap,
+                destroy
+            })
+        } as any as GPUDevice;
+
+        const u = new Uniform({ a: { x: 3 }, b: 7 }, Params);
+        u.ensure(device);
+
+        expect(() => u.setLayoutMode('standard')).toThrow(
+            /already uploaded with classic layout/
+        );
+        expect(destroy).not.toHaveBeenCalled();
     });
 });
