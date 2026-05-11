@@ -5,6 +5,7 @@
 import { type TypeDescriptor, getWgslType } from '../types/schema.js';
 import { pack, getStride } from '../utils/alignment.js';
 import { makeLabel } from '../utils/labels.js';
+import { createResourceId } from './resource-identity.js';
 
 /**
  * Buffer access mode (controls shader access, not CPU access)
@@ -46,6 +47,9 @@ export interface BufferOptions {
  * ], Particle, "rw");
  */
 export class Buffer {
+    /** Stable identity for bind group caching. */
+    readonly _resourceId = createResourceId();
+
     /** Human-friendly debug label */
     readonly label: string;
 
@@ -64,11 +68,17 @@ export class Buffer {
     /** Total byte length of the buffer */
     readonly byteLength: number;
 
-    /** Packed data ready for GPU upload */
-    private readonly packedData: ArrayBuffer;
+    /** Last CPU-provided packed data ready for GPU upload */
+    private packedData: ArrayBuffer;
 
     /** Lazily created GPU buffer */
     private gpuBuffer: GPUBuffer | null = null;
+
+    /** Bumped when the underlying GPUBuffer identity changes. */
+    private gpuResourceVersion = 0;
+
+    /** Device used to upload this buffer (captured on first ensure) */
+    private device: GPUDevice | null = null;
 
     constructor(
         data: ArrayLike<unknown>,
@@ -100,10 +110,19 @@ export class Buffer {
     }
 
     /**
-     * Get raw packed data (for testing/debugging)
+     * Get last CPU-provided packed data (for testing/debugging).
+     * GPU writes are not reflected here; use v.read() for GPU results.
      */
     get rawData(): ArrayBuffer {
         return this.packedData;
+    }
+
+    /**
+     * Version of the underlying GPUBuffer allocation.
+     * Content uploads do not change this; destroy/recreate does.
+     */
+    get _gpuResourceVersion(): number {
+        return this.gpuResourceVersion;
     }
 
     /**
@@ -113,6 +132,8 @@ export class Buffer {
      * @returns The GPU buffer
      */
     ensure(device: GPUDevice): GPUBuffer {
+        this.device = device;
+
         if (this.gpuBuffer) {
             return this.gpuBuffer;
         }
@@ -134,6 +155,49 @@ export class Buffer {
         this.gpuBuffer.unmap();
 
         return this.gpuBuffer;
+    }
+
+    /**
+     * Replace the full CPU-provided contents without resizing the buffer.
+     * If uploaded, the existing GPUBuffer is updated in place.
+     */
+    set(data: ArrayLike<unknown>): void {
+        if (data.length !== this.count) {
+            throw new Error(
+                `Volten Error: Buffer "${this.label}" update changed element count ` +
+                    `from ${this.count} to ${data.length}.\n` +
+                    '  Buffer.set() can update contents, but it cannot resize the underlying GPU buffer.'
+            );
+        }
+
+        this.packedData = pack(data, this.type);
+
+        if (this.gpuBuffer && this.device) {
+            this.device.queue.writeBuffer(this.gpuBuffer, 0, this.packedData);
+        }
+    }
+
+    /**
+     * Update a contiguous element range. Offset is measured in buffer elements.
+     * If uploaded, the existing GPUBuffer is updated in place.
+     */
+    update(data: ArrayLike<unknown>, elementOffset = 0): void {
+        this.validateUpdateRange(data.length, elementOffset);
+
+        const packedUpdate = pack(data, this.type);
+        const byteOffset = elementOffset * this.stride;
+        new Uint8Array(this.packedData).set(
+            new Uint8Array(packedUpdate),
+            byteOffset
+        );
+
+        if (this.gpuBuffer && this.device) {
+            this.device.queue.writeBuffer(
+                this.gpuBuffer,
+                byteOffset,
+                packedUpdate
+            );
+        }
     }
 
     /**
@@ -162,6 +226,21 @@ export class Buffer {
         if (this.gpuBuffer) {
             this.gpuBuffer.destroy();
             this.gpuBuffer = null;
+            this.gpuResourceVersion++;
+        }
+    }
+
+    private validateUpdateRange(length: number, elementOffset: number): void {
+        if (!Number.isInteger(elementOffset) || elementOffset < 0) {
+            throw new Error(
+                `Volten Error: Buffer "${this.label}" update offset must be a non-negative integer.`
+            );
+        }
+        if (elementOffset + length > this.count) {
+            throw new Error(
+                `Volten Error: Buffer "${this.label}" update range exceeds buffer length.\n` +
+                    `  Buffer has ${this.count} elements, update starts at ${elementOffset} and contains ${length} elements.`
+            );
         }
     }
 }

@@ -85,6 +85,7 @@ export const RESERVED_NODE_PROPERTIES = [
     '_bindings',
     '_shaderCode',
     '_label',
+    '_cachedBindGroup',
     '_debug'
 ] as const;
 
@@ -97,6 +98,11 @@ export const RESERVED_NODE_PROPERTIES = [
  */
 export interface NodeOwnedResource {
     destroy(): void;
+}
+
+export interface CachedNodeBindGroup {
+    readonly key: string;
+    readonly bindGroup: GPUBindGroup;
 }
 
 /**
@@ -146,6 +152,8 @@ export interface NodeBase {
     readonly _bindings: Readonly<Record<string, unknown>>;
     /** Full assembled shader code (for debugging) */
     readonly _shaderCode: string;
+    /** Cached bind group for repeated executions of this node. */
+    _cachedBindGroup?: CachedNodeBindGroup | null;
     /** Optional internal shader-debug state for this node */
     readonly _debug: NodeDebugState | null;
 }
@@ -259,6 +267,7 @@ export function createNode(options: CreateNodeOptions): Node {
         _dispatch: Object.freeze(dispatch) as readonly [number, number, number],
         _bindings: Object.freeze(bindings),
         _shaderCode: shaderCode,
+        _cachedBindGroup: null,
         _debug: debug
     };
 

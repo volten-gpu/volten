@@ -81,6 +81,8 @@ import {
  */
 export type ReadTarget = Node | Buffer | RawBuffer | Handle;
 
+type BindableResource = Buffer | RawBuffer | Uniform;
+
 function dispatchNeedsBoundsGuard(
     bounds: [number, number, number],
     dispatch: [number, number, number],
@@ -319,18 +321,64 @@ export class VoltenContext {
         );
     }
 
-    /**
-     * Resolve a binding value to its GPUBuffer.
-     */
-    private _resolveGPUBuffer(
+    private _resolveBindableResource(
         value: Buffer | RawBuffer | Uniform | Handle
-    ): GPUBuffer {
-        // no need to Handle-check uniforms, it would make
-        // no sense to have an Handle to a uniform
-        if (value instanceof Uniform) {
-            return value.ensure(this.device);
+    ): BindableResource {
+        if (
+            value instanceof Buffer ||
+            value instanceof RawBuffer ||
+            value instanceof Uniform
+        ) {
+            return value;
         }
-        return this._resolveConcreteBuffer(value).ensure(this.device);
+        if (isHandle(value)) {
+            const sourceBinding = value._node._bindings[value._name];
+            return this._resolveBindableResource(
+                sourceBinding as Buffer | RawBuffer | Uniform | Handle
+            );
+        }
+        throw new Error(
+            `Volten Error: Cannot resolve bindable resource from binding of type ${typeof value}.`
+        );
+    }
+
+    private _getOrCreateBindGroup(node: Node): GPUBindGroup {
+        const entries: GPUBindGroupEntry[] = [];
+        const cacheParts: string[] = [];
+
+        for (const entry of node._bindingEntries) {
+            const resource = this._resolveBindableResource(entry.source);
+            const gpuBuffer = resource.ensure(this.device);
+
+            cacheParts.push(
+                `${entry.index}:${resource._resourceId}:${resource._gpuResourceVersion}`
+            );
+            entries.push({
+                binding: entry.index,
+                resource: {
+                    buffer: gpuBuffer
+                }
+            });
+        }
+
+        const cacheKey = cacheParts.join('|');
+        const cached = node._cachedBindGroup;
+        if (cached && cached.key === cacheKey) {
+            return cached.bindGroup;
+        }
+
+        const bindGroup = this.device.createBindGroup({
+            label: `${node._label} bind group`,
+            layout: node._bindGroupLayout,
+            entries
+        });
+
+        node._cachedBindGroup = {
+            key: cacheKey,
+            bindGroup
+        };
+
+        return bindGroup;
     }
 
     // -----------------------------------------------------------------------
@@ -360,7 +408,7 @@ export class VoltenContext {
      *
      * Takes a pre-compiled plan (sorted node list) and:
      * 1. Ensures all GPU buffers are uploaded
-     * 2. Creates bind groups (resolving Handles to actual GPUBuffers)
+     * 2. Gets or creates bind groups (resolving Handles to actual GPUBuffers)
      * 3. Manages compute passes (reuses when possible, breaks on hazards)
      * 4. Encodes dispatches
      * 5. Submits the command buffer
@@ -389,32 +437,7 @@ export class VoltenContext {
                 node._debug.resource.reset(this.device);
             }
 
-            // Ensure all Buffer/RawBuffer bindings are uploaded
-            for (const entry of node._bindingEntries) {
-                if (
-                    entry.source instanceof Buffer ||
-                    entry.source instanceof RawBuffer ||
-                    entry.source instanceof Uniform
-                ) {
-                    entry.source.ensure(this.device);
-                }
-            }
-
-            // Build bind group entries, resolving Handles to actual GPUBuffers
-            const bgEntries: GPUBindGroupEntry[] = node._bindingEntries.map(
-                (entry) => ({
-                    binding: entry.index,
-                    resource: {
-                        buffer: this._resolveGPUBuffer(entry.source)
-                    }
-                })
-            );
-
-            const bindGroup = this.device.createBindGroup({
-                label: `${node._label} bind group`,
-                layout: node._bindGroupLayout,
-                entries: bgEntries
-            });
+            const bindGroup = this._getOrCreateBindGroup(node);
 
             // Check for dependencies within the current pass
             let dependsOnCurrentPass = false;
