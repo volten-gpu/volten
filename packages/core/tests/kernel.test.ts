@@ -376,6 +376,28 @@ describe('Kernel Class', () => {
     });
 
     describe('outputs normalization', () => {
+        it('handles string output names', () => {
+            const kernel = new Kernel('fn main() { }', {
+                outputs: ['result', 'debug']
+            });
+
+            expect(kernel.outputs).toEqual([
+                {
+                    name: 'result',
+                    definedBy: undefined,
+                    type: undefined,
+                    size: undefined
+                },
+                {
+                    name: 'debug',
+                    definedBy: undefined,
+                    type: undefined,
+                    size: undefined
+                }
+            ]);
+            expect(kernel.outputNames).toEqual(['result', 'debug']);
+        });
+
         it('handles definedBy outputs', () => {
             const kernel = new Kernel('fn main() { }', {
                 outputs: {

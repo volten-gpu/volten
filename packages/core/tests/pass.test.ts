@@ -29,7 +29,8 @@ import {
     createNode,
     createHandle,
     validateOutputName,
-    getNodeOutputs,
+    getNodeHandles,
+    getNodeOutputHandles,
     isBufferLike,
     type Handle
 } from '../src/graph/node.js';
@@ -527,6 +528,25 @@ describe('Thread Dispatch Resolution', () => {
             expect(dispatch).toEqual([1, 1, 1]);
         });
 
+        it('auto-infers from single input when string outputs exclude the output binding', () => {
+            const input = makeBuffer(
+                Array.from({ length: 64 }, (_, i) => i),
+                'f32',
+                'r'
+            );
+            const output = makeBuffer(
+                Array.from({ length: 64 }, () => 0),
+                'f32',
+                'rw'
+            );
+            const kernel = new Kernel('fn main() { }', {
+                outputs: ['output']
+            });
+            const dispatch = resolveDispatch(kernel, { input, output });
+
+            expect(dispatch).toEqual([1, 1, 1]);
+        });
+
         it('throws when string threads references missing binding', () => {
             const kernel = new Kernel('fn main() { }', { threads: 'data' });
 
@@ -805,8 +825,8 @@ describe('Node Creation', () => {
                 dependencies: []
             });
 
-            const outputs = getNodeOutputs(node);
-            expect(Object.keys(outputs)).toEqual([]);
+            const handles = getNodeHandles(node);
+            expect(Object.keys(handles)).toEqual([]);
         });
 
         it('does not create handles for Uniform bindings', () => {
@@ -825,8 +845,8 @@ describe('Node Creation', () => {
                 dependencies: []
             });
 
-            const outputs = getNodeOutputs(node);
-            expect(Object.keys(outputs)).toEqual([]);
+            const handles = getNodeHandles(node);
+            expect(Object.keys(handles)).toEqual([]);
             expect(isBufferLike(uniform)).toBe(false);
         });
     });
@@ -1310,8 +1330,11 @@ fn main(gid: vec3u) {
 
         const node = v.pass(kernel, { data });
 
-        const outputs = getNodeOutputs(node);
-        expect(Object.keys(outputs)).toEqual(['data']);
+        const handles = getNodeHandles(node);
+        expect(Object.keys(handles)).toEqual(['data']);
+
+        const outputs = getNodeOutputHandles(node);
+        expect(Object.keys(outputs)).toEqual([]);
     });
 
     it('handles multiple outputs', () => {
@@ -1333,13 +1356,16 @@ fn main(gid: vec3u) {
         expect(node.albedo._name).toBe('albedo');
         expect(node.normal._name).toBe('normal');
 
-        const outputs = getNodeOutputs(node);
+        const handles = getNodeHandles(node);
         // All buffer bindings get handles (input too)
-        expect(Object.keys(outputs).sort()).toEqual([
+        expect(Object.keys(handles).sort()).toEqual([
             'albedo',
             'input',
             'normal'
         ]);
+
+        const outputs = getNodeOutputHandles(node);
+        expect(Object.keys(outputs).sort()).toEqual(['albedo', 'normal']);
     });
 
     it('creates handles for in-place buffer bindings without output declarations', () => {

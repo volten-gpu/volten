@@ -208,16 +208,48 @@ fn main(gid: vec3u) {
         expect(mockBeginComputePass).not.toHaveBeenCalled();
         expect(mockPassDispatch).not.toHaveBeenCalled();
         expect(mockSubmit).toHaveBeenCalledTimes(1);
-        expect(mockCopyBufferToBuffer).toHaveBeenCalled();
+        expect(mockCopyBufferToBuffer).toHaveBeenCalledTimes(2);
         expect(mockMapAsync).toHaveBeenCalled();
         expect(mockGetMappedRange).toHaveBeenCalled();
 
         // Check result structure
+        expect(result).not.toHaveProperty('input');
         expect(result).toHaveProperty('outputFloat');
         expect(result['outputFloat']).toBeInstanceOf(Float32Array);
 
         expect(result).toHaveProperty('outputUint');
         expect(result['outputUint']).toBeInstanceOf(Uint32Array);
+    });
+
+    it('v.read() supports string-declared node outputs', async () => {
+        const input = new Buffer([1], 'f32');
+        const output = new Buffer([0], 'f32');
+        const K = new Kernel('fn main() {}', {
+            outputs: ['output'],
+            threads: 'input'
+        });
+        const node = v.pass(K, { input, output });
+
+        mockCopyBufferToBuffer.mockClear();
+
+        const result = await v.read(node);
+
+        expect(mockCopyBufferToBuffer).toHaveBeenCalledTimes(1);
+        expect(result).toHaveProperty('output');
+        expect(result).not.toHaveProperty('input');
+    });
+
+    it('v.read(node) rejects nodes without declared outputs while explicit handles remain readable', async () => {
+        const data = new Buffer([1], 'f32');
+        const K = new Kernel('fn main() {}', { threads: 'data' });
+        const node = v.pass(K, { data });
+
+        await expect(v.read(node)).rejects.toThrow(/no declared outputs/);
+
+        mockCopyBufferToBuffer.mockClear();
+        await v.read(node.data);
+
+        expect(mockCopyBufferToBuffer).toHaveBeenCalledTimes(1);
     });
 
     // =================================================================

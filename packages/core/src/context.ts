@@ -52,7 +52,7 @@ import { prepareKernelShader } from './kernel/shader.js';
 import { VOLTEN_BOUNDS_NAME } from './kernel/builtins.js';
 import {
     createNode,
-    getNodeOutputs,
+    getNodeOutputHandles,
     type Node,
     type Handle,
     isHandle
@@ -570,7 +570,7 @@ export class VoltenContext {
                 targetPlans.push({ type: 'buffer', concrete });
             } else {
                 // It's a Node
-                const nodeOutputs = getNodeOutputs(t as Node);
+                const nodeOutputs = getNodeOutputHandles(t as Node);
                 const outputNames = Object.keys(nodeOutputs);
                 if (outputNames.length === 0) {
                     throw new Error(

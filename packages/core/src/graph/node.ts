@@ -183,15 +183,37 @@ export type Node<
 > = NodeBase & TOutputs;
 
 /**
- * Helper to extract output handles from a Node (filtering out internal properties).
+ * Helper to extract all public buffer handles from a Node (filtering out
+ * internal properties).
  */
-export function getNodeOutputs(node: Node): Record<string, Handle> {
-    const outputs: Record<string, Handle> = {};
+export function getNodeHandles(node: Node): Record<string, Handle> {
+    const handles: Record<string, Handle> = {};
     for (const key of Object.keys(node)) {
         if (!key.startsWith('_')) {
-            outputs[key] = (node as any)[key];
+            handles[key] = (node as any)[key];
         }
     }
+    return handles;
+}
+
+/**
+ * Helper to extract only the handles declared as kernel outputs.
+ */
+export function getNodeOutputHandles(node: Node): Record<string, Handle> {
+    const handles = getNodeHandles(node);
+    const outputs: Record<string, Handle> = {};
+
+    for (const name of node._kernel.outputNames) {
+        const handle = handles[name];
+        if (!handle) {
+            throw new Error(
+                `Volten Error: Kernel output "${name}" was declared, but no matching buffer binding exists on node "${node._label}".\n` +
+                    `  Hint: Provide a buffer binding named "${name}", or read an explicit handle with v.read(node.someHandle).`
+            );
+        }
+        outputs[name] = handle;
+    }
+
     return outputs;
 }
 

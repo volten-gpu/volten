@@ -22,16 +22,22 @@ const k = new Kernel(
           inout[gid.x] = inout[gid.x] * mult;
         }
       `,
-    { threads: 4, label: 'Ktest' }
+    {
+        threads: 4,
+        label: 'Ktest'
+    }
 );
-const A = v.pass(k, { inout: buf, mult }, { debug: {} });
+
+const A = v.pass(k, { inout: buf, mult }, { debug: true });
 // const B = v.pass(k, { inout: buf, mult });
 
 // v.run([A, B]);
 v.run(A);
 
 const output = await v.read(buf);
+const output2 = await v.read(A);
 console.log(Array.from(output));
+console.log(output2);
 
 const debugRes = await v.readDebug(A);
 debugRes.print();

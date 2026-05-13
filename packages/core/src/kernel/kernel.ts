@@ -32,8 +32,14 @@ export interface OutputConfig {
     size?: OutputSize;
 }
 
-/** Output declarations — record mapping output name to config */
-export type OutputsSpec = Record<string, OutputConfig>;
+/**
+ * Output declarations.
+ *
+ * - string[]: semantic output names only. Useful when users provide buffers.
+ * - Record<string, OutputConfig>: output names plus shape metadata for future
+ *   Volten-owned auto-allocation.
+ */
+export type OutputsSpec = readonly string[] | Record<string, OutputConfig>;
 
 /**
  * Specifies how many GPU threads to launch for a kernel.
@@ -207,6 +213,15 @@ export class Kernel {
      */
     private normalizeOutputs(spec?: OutputsSpec): NormalizedOutput[] {
         if (!spec) return [];
+
+        if (Array.isArray(spec)) {
+            return spec.map((name) => ({
+                name,
+                definedBy: undefined,
+                type: undefined,
+                size: undefined
+            }));
+        }
 
         return Object.entries(spec).map(([name, config]) => ({
             name,
