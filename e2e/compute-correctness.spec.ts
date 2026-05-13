@@ -31,8 +31,8 @@ test.describe('Arithmetic compute operations', () => {
             `);
             const node = v.pass(k, { inout: buf });
             v.run(node);
-            const output = await v.read(node);
-            return Array.from(output.inout);
+            const output = await v.read(buf);
+            return Array.from(output);
         });
 
         expect(result).toEqual([2, 4, 6, 8, 10]);
@@ -51,8 +51,8 @@ test.describe('Arithmetic compute operations', () => {
             `);
             const node = v.pass(k, { inout: buf });
             v.run(node);
-            const output = await v.read(node);
-            return Array.from(output.inout);
+            const output = await v.read(buf);
+            return Array.from(output);
         });
 
         expect(result).toEqual([110, 120, 130]);
@@ -98,8 +98,8 @@ test.describe('Arithmetic compute operations', () => {
             `);
             const node = v.pass(k, { inout: buf });
             v.run(node);
-            const output = await v.read(node);
-            return Array.from(output.inout);
+            const output = await v.read(buf);
+            return Array.from(output);
         });
 
         expect(result).toEqual([11, 12, 13, 14]);
@@ -119,8 +119,8 @@ test.describe('Arithmetic compute operations', () => {
             `);
             const node = v.pass(k, { inout: buf });
             v.run(node);
-            const output = await v.read(node);
-            return Array.from(output.inout);
+            const output = await v.read(buf);
+            return Array.from(output);
         });
 
         expect(result).toEqual([4, 9, 16, 25]);
@@ -154,8 +154,8 @@ test.describe('Thread dispatch inference', () => {
             `);
             const node = v.pass(k, { inout: buf });
             v.run(node);
-            const output = await v.read(node);
-            const arr = Array.from(output.inout);
+            const output = await v.read(buf);
+            const arr = Array.from(output);
             return {
                 length: arr.length,
                 first5: arr.slice(0, 5),
@@ -189,8 +189,8 @@ test.describe('Thread dispatch inference', () => {
             );
             const node = v.pass(k, { inout: buf });
             v.run(node);
-            const output = await v.read(node);
-            return Array.from(output.inout);
+            const output = await v.read(buf);
+            return Array.from(output);
         });
 
         // First 4 multiplied, last 4 untouched
@@ -220,8 +220,8 @@ test.describe('Thread dispatch inference', () => {
             );
             const node = v.pass(k, { inout: buf });
             v.run(node);
-            const output = await v.read(node);
-            return Array.from(output.inout);
+            const output = await v.read(buf);
+            return Array.from(output);
         });
 
         expect(result.slice(0, 4)).toEqual([10, 20, 30, 40]);

@@ -9,6 +9,7 @@ export type { PassOptions } from './context.js';
 
 // Type utilities (stateless)
 export { struct, array } from './types/index.js';
+export { unpack } from './utils/index.js';
 
 // Data containers
 export { Buffer, RawBuffer, Uniform } from './data/index.js';

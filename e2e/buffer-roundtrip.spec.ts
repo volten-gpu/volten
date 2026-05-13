@@ -31,8 +31,8 @@ test.describe('Buffer data round-trip', () => {
             `);
             const node = v.pass(k, { inout: buf });
             v.run(node);
-            const output = await v.read(node);
-            return Array.from(output.inout);
+            const output = await v.read(buf);
+            return Array.from(output);
         });
 
         expect(result).toEqual([1.5, 2.25, 3.75, 4.0, 5.125]);
@@ -52,8 +52,8 @@ test.describe('Buffer data round-trip', () => {
             `);
             const node = v.pass(k, { inout: buf });
             v.run(node);
-            const output = await v.read(node);
-            return Array.from(output.inout);
+            const output = await v.read(buf);
+            return Array.from(output);
         });
 
         expect(result).toEqual([0, 1, 255, 65535, 4294967295]);
@@ -73,8 +73,8 @@ test.describe('Buffer data round-trip', () => {
             `);
             const node = v.pass(k, { inout: buf });
             v.run(node);
-            const output = await v.read(node);
-            return Array.from(output.inout);
+            const output = await v.read(buf);
+            return Array.from(output);
         });
 
         expect(result).toEqual([-100, -1, 0, 1, 100]);
@@ -95,8 +95,8 @@ test.describe('Buffer data round-trip', () => {
             `);
             const node = v.pass(k, { inout: buf });
             v.run(node);
-            const output = await v.read(node);
-            const arr = Array.from(output.inout);
+            const output = await v.read(buf);
+            const arr = Array.from(output);
 
             // Verify first 5, last 5, and length
             return {

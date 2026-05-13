@@ -1,7 +1,7 @@
 {
     "name": "@volten/math",
     "version": "0.0.0",
-    "private": false,
+    "private": true,
     "type": "module",
     "exports": {
         ".": "./src/index.ts"

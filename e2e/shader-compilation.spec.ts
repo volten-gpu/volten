@@ -28,8 +28,8 @@ test.describe('Shader compilation on real GPU', () => {
             `);
             const node = v.pass(k, { inout: buf });
             v.run(node);
-            const output = await v.read(node);
-            return Array.from(output.inout);
+            const output = await v.read(buf);
+            return Array.from(output);
         });
 
         // Identity: output should equal input
@@ -50,8 +50,8 @@ test.describe('Shader compilation on real GPU', () => {
             `);
             const node = v.pass(k, { inout: buf });
             v.run(node);
-            const output = await v.read(node);
-            return Array.from(output.inout);
+            const output = await v.read(buf);
+            return Array.from(output);
         });
 
         // We don't assert exact values (lid depends on workgroup layout),
@@ -97,8 +97,8 @@ test.describe('Shader compilation on real GPU', () => {
             `);
             const node = v.pass(k, { inout: buf });
             v.run(node);
-            const output = await v.read(node);
-            return Array.from(output.inout);
+            const output = await v.read(buf);
+            return Array.from(output);
         });
 
         expect(result).toEqual([5, 10, 15, 20]);
@@ -117,8 +117,8 @@ test.describe('Shader compilation on real GPU', () => {
             `);
             const node = v.pass(k, { inout: buf });
             v.run(node);
-            const output = await v.read(node);
-            return Array.from(output.inout);
+            const output = await v.read(buf);
+            return Array.from(output);
         });
 
         expect(result).toEqual([-1, 0, 1, 42]);

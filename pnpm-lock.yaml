@@ -29,9 +29,6 @@ importers:
       '@volten/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@volten/stdlib':
-        specifier: workspace:*
-        version: link:../../packages/stdlib
     devDependencies:
       '@repo/typescript-config':
         specifier: workspace:*
