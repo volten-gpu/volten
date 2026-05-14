@@ -7,6 +7,7 @@ pnpm build
 pnpm lint
 pnpm check-types
 pnpm test:all
+pnpm test:pack
 cd packages/core
 npm pack --dry-run
 ```

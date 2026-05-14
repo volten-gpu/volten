@@ -8,7 +8,7 @@
     "./react-library.json": "./react-library.json"
   },
   "dependencies": {
-    "@webgpu/types": "^0.1.69"
+    "@webgpu/types": "^0.1.65"
   },
   "publishConfig": {
     "access": "public"
