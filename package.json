@@ -7,7 +7,7 @@
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "check-types": "turbo run check-types",
-    "test:e2e": "npx playwright test",
+    "test:e2e": "pnpm --filter @volten/core build && npx playwright test",
     "test:all": "turbo run test && npx playwright test"
   },
   "devDependencies": {
