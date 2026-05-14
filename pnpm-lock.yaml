@@ -63,6 +63,10 @@ importers:
         version: 6.4.1(@types/node@22.19.7)
 
   packages/core:
+    dependencies:
+      '@webgpu/types':
+        specifier: ^0.1.69
+        version: 0.1.69
     devDependencies:
       '@repo/eslint-config':
         specifier: workspace:*
@@ -73,9 +77,6 @@ importers:
       '@types/node':
         specifier: ^22.15.3
         version: 22.19.7
-      '@webgpu/types':
-        specifier: ^0.1.69
-        version: 0.1.69
       eslint:
         specifier: ^9.39.1
         version: 9.39.2

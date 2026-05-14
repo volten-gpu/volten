@@ -1,7 +1,23 @@
-import { volten, Buffer, RawBuffer, Kernel, struct, array } from '@volten/core';
+import {
+    volten,
+    Buffer,
+    RawBuffer,
+    Uniform,
+    Kernel,
+    struct,
+    array
+} from '@volten/core';
 
 // Expose all public API on window for Playwright's page.evaluate()
-(window as any).Volten = { volten, Buffer, RawBuffer, Kernel, struct, array };
+(window as any).Volten = {
+    volten,
+    Buffer,
+    RawBuffer,
+    Uniform,
+    Kernel,
+    struct,
+    array
+};
 
 // Probe GPU readiness so tests can await it
 (async () => {

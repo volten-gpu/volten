@@ -1,4 +1,5 @@
 // @volten/core - Public exports
+export type {} from './webgpu-types.js';
 
 // Factory function
 export { volten } from './volten.js';
