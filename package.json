@@ -1,6 +1,7 @@
 {
   "name": "volten",
   "private": true,
+  "description": "Volten monorepo",
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",

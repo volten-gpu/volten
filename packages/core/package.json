@@ -1,9 +1,27 @@
 {
   "name": "@volten/core",
   "version": "0.0.0",
+  "description": "WebGPU compute, without the ceremony.",
   "private": false,
   "license": "MIT",
   "type": "module",
+  "keywords": [
+    "webgpu",
+    "gpu",
+    "compute",
+    "wgsl",
+    "shader",
+    "gpgpu"
+  ],
+  "homepage": "https://github.com/volten-gpu/volten#readme",
+  "bugs": {
+    "url": "https://github.com/volten-gpu/volten/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/volten-gpu/volten.git",
+    "directory": "packages/core"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -15,8 +33,12 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
+    "prepack": "pnpm run build",
     "test": "vitest",
     "test:run": "vitest run",
     "lint": "eslint . --max-warnings 0",
