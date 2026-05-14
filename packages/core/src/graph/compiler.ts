@@ -47,12 +47,12 @@
 // that v.run(A, B, C) produces execution order consistent with the user's
 // positional intent at every level of the graph.
 //
-// # Pool-allocated buffers
+// # Volten auto-allocated buffers
 //
-// Pool-allocated buffers (future feature) are exempt from overlap
+// Volten auto-allocated buffers (future feature) are exempt from overlap
 // detection because they only exist through Handle references in the
 // graph. Two independent nodes can never accidentally share a
-// pool-allocated buffer — Volten controls the allocation and would
+// Volten-owned buffer — Volten controls the allocation and would
 // never assign the same buffer to two live nodes.
 //
 // ============================================================================

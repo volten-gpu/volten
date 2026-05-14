@@ -5,7 +5,7 @@ import { makeLabel } from '../utils/labels.js';
 
 const BARRIER_USAGE_REGEX = /\b(?:workgroupBarrier|storageBarrier)\s*\(/;
 
-/** Output size specification for pool allocation */
+/** Output size specification for future auto-allocation metadata. */
 export type OutputSize = number | ((data: Record<string, unknown>) => number);
 
 /** Configuration for a single output */
@@ -36,8 +36,7 @@ export interface OutputConfig {
  * Output declarations.
  *
  * - string[]: semantic output names only. Useful when users provide buffers.
- * - Record<string, OutputConfig>: output names plus shape metadata for future
- *   Volten-owned auto-allocation.
+ * - Record<string, OutputConfig>: output names plus optional shape metadata.
  */
 export type OutputsSpec = readonly string[] | Record<string, OutputConfig>;
 
@@ -73,7 +72,7 @@ export interface KernelOptions {
     label?: string;
 
     /**
-     * Output declarations for pool-allocation preparation.
+     * Output declarations for node readback and future auto-allocation metadata.
      *
      * Record<string, OutputConfig>: declarative output description with
      * definedBy / type / size fields.
@@ -153,7 +152,7 @@ export interface NormalizedOutput {
  *   }
  * `);
  *
- * // Kernel with declarative outputs (for pool allocation)
+ * // Kernel with declarative output metadata
  * const BlurKernel = new Kernel(`...`, {
  *   outputs: { output: { definedBy: 'input' } },
  * });

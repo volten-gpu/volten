@@ -310,7 +310,7 @@ export class VoltenContext {
      * - Injects synthetic dependencies for buffer-overlapping nodes
      * - Produces a topologically sorted execution order
      *
-     * This is the seam where pool allocation will slot in (future).
+     * This is where future auto-allocation planning can slot in.
      *
      * @param terminals - Terminal nodes in the order specified by v.run()
      * @returns An ExecutionPlan with nodes in safe execution order

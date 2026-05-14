@@ -5,7 +5,7 @@ export { volten } from './volten.js';
 
 // Context
 export { VoltenContext } from './context.js';
-export type { PassOptions } from './context.js';
+export type { PassOptions, ReadTarget, VoltenOptions } from './context.js';
 
 // Type utilities (stateless)
 export { struct, array } from './types/index.js';
