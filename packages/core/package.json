@@ -1,6 +1,6 @@
 {
   "name": "@volten/core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "WebGPU compute, without the ceremony.",
   "private": false,
   "license": "MIT",
@@ -11,7 +11,13 @@
     "compute",
     "wgsl",
     "shader",
-    "gpgpu"
+    "gpgpu",
+    "typescript",
+    "javascript",
+    "gpu-computing",
+    "compute-shaders",
+    "webgpu-compute",
+    "shader-debugging"
   ],
   "homepage": "https://github.com/volten-gpu/volten#readme",
   "bugs": {
