@@ -78,15 +78,15 @@ bun add @volten/core
 
 ### Documentation
 
-Documentation is still in progress: [docs WIP](./docs/README.md).
+Documentation is still in progress
 
 ### Packages
 
-| Package          | Status                    | Description                                                                                                            |
-| ---------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `@volten/core`   | Public                    | Core WebGPU compute API: contexts, kernels, buffers, uniforms, pass graphs, scheduling, readback, and debug utilities. |
-| `@volten/stdlib` | Private workspace package | Reserved for reusable compute kernels and higher-level GPU operations. Not part of the first public release yet.       |
-| `@volten/math`   | Private workspace package | Reserved for future math helpers. Not part of the first public release yet.                                            |
+| Package          | Status                    | Description                                  |
+| ---------------- | ------------------------- | -------------------------------------------- |
+| `@volten/core`   | Public                    | Core WebGPU compute API |
+| `@volten/stdlib` | Private workspace package | Reserved for reusable compute kernels, WIP |
+| `@volten/math`   | Private workspace package | Reserved for future math helpers, WIP |
 
 ### Development
 
