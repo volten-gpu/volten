@@ -1,0 +1,31 @@
+---
+title: Volten Documentation
+description: Learn how to use Volten to massively simplify WebGPU compute shaders.
+template: splash
+hero:
+    tagline: WebGPU compute, without the ceremony.
+    actions:
+        - text: Get started
+          link: /getting-started/
+          icon: right-arrow
+        - text: GitHub
+          link: https://github.com/volten-gpu/volten
+          icon: external
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+Volten is a TypeScript library for writing WGSL compute kernels, massively simplifying the setup required to create and manage WebGPU compute shaders
+
+<CardGrid>
+    <Card title="Small API surface" icon="setting">
+        Start with `volten()`, `Buffer`, `Uniform`, and `Kernel`.
+    </Card>
+    <Card title="WebGPU-first" icon="rocket">
+        Keep shader code in WGSL while letting Volten handle the repetitive
+        setup.
+    </Card>
+    <Card title="Debuggable kernels" icon="pencil">
+        Use Volten's debug helpers to inspect values from GPU execution.
+    </Card>
+</CardGrid>

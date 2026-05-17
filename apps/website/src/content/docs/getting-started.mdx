@@ -1,0 +1,50 @@
+---
+title: Getting Started
+description: Install @volten/core and run a first compute kernel.
+---
+
+## Install
+
+Install the public core package:
+
+```sh
+pnpm add @volten/core
+```
+
+You can also use another package manager:
+
+```sh
+npm install @volten/core
+yarn add @volten/core
+bun add @volten/core
+```
+
+## Run a Kernel
+
+Here's the simplest possible Volten kernel, if this snippet logs in your console: <br></br>
+`Float32Array [10, 20, 30, 40]` the installation completed successfully and you're ready
+to follow our docs
+
+```ts
+import { volten, Buffer, Kernel, Uniform } from '@volten/core';
+
+const v = await volten();
+const inout = new Buffer([1, 2, 3, 4], 'f32', 'rw');
+const mult = new Uniform(10, 'f32');
+
+const kernel = new Kernel(`
+  fn main(gid: vec3u) {
+    inout[gid.x] = inout[gid.x] * mult;
+  }
+`);
+
+const node = v.pass(kernel, { inout, mult });
+v.run(node);
+
+console.log(await v.read(inout));
+// Float32Array [10, 20, 30, 40]
+```
+
+## Browser Support
+
+Volten uses WebGPU, so your code must run in an environment with WebGPU support. In browsers, `volten()` requests a `GPUAdapter` and `GPUDevice` from `navigator.gpu`.

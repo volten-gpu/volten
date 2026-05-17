@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1016" height="1076" viewBox="0 0 1016 1076" fill="none" role="img" aria-label="Clean vector version of uploaded isometric cube logo with unified orange gradient, removed seams, and top inner face matching the background tone">
+  <defs>
+    <linearGradient xmlns="http://www.w3.org/2000/svg" id="topRibbon" x1="253" y1="393" x2="763" y2="393" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#b76dc2"/>
+      <stop offset="0.45" stop-color="#bb6bc4"/>
+      <stop offset="1" stop-color="#966ed2"/>
+    </linearGradient>
+
+    <linearGradient xmlns="http://www.w3.org/2000/svg" id="orangeContinuous" x1="270" y1="390" x2="508" y2="861" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFC450"/>
+      <stop offset="0.40" stop-color="#FF9A48"/>
+      <stop offset="0.72" stop-color="#FF7C5A"/>
+      <stop offset="1" stop-color="rgb(254 115 110)"/>
+    </linearGradient>
+
+    <linearGradient id="cubeLeft" x1="326" y1="436" x2="512" y2="764" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F0EDFF"/>
+      <stop offset="1" stop-color="#DAD9FF"/>
+    </linearGradient>
+
+    <linearGradient xmlns="http://www.w3.org/2000/svg" id="cubeRight" x1="512" y1="546" x2="692" y2="436" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fef2fe"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Orange ribbon: exact shared vertices + matching gradient stroke to eliminate anti-aliased seams. -->
+  <g fill="url(#orangeContinuous)" stroke="url(#orangeContinuous)" stroke-width="2" stroke-linejoin="round" shape-rendering="geometricPrecision">
+    <path d="M248 390 L326 436 L326 654 L248 704 Z"/>
+    <path d="M692 436 L766 390 L766 704 L692 654 Z"/>
+    <path d="M248 704 L326 654 L512 764 L692 654 L766 704 L508 861 Z"/>
+  </g>
+
+  <!-- Top purple ribbon -->
+  <path d="M512 234 L766 390 L692 436 L512 326 L326 436 L248 390 Z" fill="url(#topRibbon)"/>
+
+  <!-- Top inner face matches the original background tone. -->
+  <path d="M326 436 L512 326 L692 436 L512 546 Z" fill="#FFFFFF"/>
+
+  <!-- Side inner faces preserve the original cube coloring. -->
+  <path d="M326 436 L512 546 L512 764 L326 654 Z" fill="url(#cubeLeft)"/>
+  <path d="M512 546 L692 436 L692 654 L512 764 Z" fill="url(#cubeRight)"/>
+</svg>
