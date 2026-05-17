@@ -68,14 +68,6 @@ Install the public core package:
 pnpm add @volten/core
 ```
 
-Or with another package manager:
-
-```sh
-npm install @volten/core
-yarn add @volten/core
-bun add @volten/core
-```
-
 ### Documentation
 
 Documentation is still in progress
@@ -90,17 +82,7 @@ Documentation is still in progress
 
 ### Development
 
-This repository uses pnpm workspaces and Turborepo.
-
-```sh
-pnpm install
-pnpm build
-pnpm lint
-pnpm check-types
-pnpm test:all
-```
-
-Useful scripts:
+This repository uses pnpm workspaces and Turborepo. Useful scripts:
 
 | Command            | Description                                                     |
 | ------------------ | --------------------------------------------------------------- |
