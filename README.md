@@ -70,15 +70,15 @@ pnpm add @volten/core
 
 ### Documentation
 
-Documentation is still in progress
+Documentation is still in progress, but you can get a preview by running the `apps/website` folder
 
 ### Packages
 
-| Package          | Status                    | Description                                  |
-| ---------------- | ------------------------- | -------------------------------------------- |
-| `@volten/core`   | Public                    | Core WebGPU compute API |
+| Package          | Status                    | Description                                |
+| ---------------- | ------------------------- | ------------------------------------------ |
+| `@volten/core`   | Public                    | Core WebGPU compute API                    |
 | `@volten/stdlib` | Private workspace package | Reserved for reusable compute kernels, WIP |
-| `@volten/math`   | Private workspace package | Reserved for future math helpers, WIP |
+| `@volten/math`   | Private workspace package | Reserved for future math helpers, WIP      |
 
 ### Development
 
