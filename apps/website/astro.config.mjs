@@ -30,6 +30,16 @@ export default defineConfig({
                         { slug: 'getting-started' },
                         { slug: 'guides/core-concepts' }
                     ]
+                },
+                {
+                    label: 'Data',
+                    items: [
+                        { slug: 'data/buffers' },
+                        { slug: 'data/uniforms' },
+                        { slug: 'data/raw-buffers' },
+                        { slug: 'data/structs-and-arrays' },
+                        { slug: 'data/reading-data' }
+                    ]
                 }
             ]
         })

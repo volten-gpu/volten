@@ -21,9 +21,9 @@ bun add @volten/core
 
 ## Run a Kernel
 
-Here's the simplest possible Volten kernel, if this snippet logs in your console: <br></br>
-`Float32Array [10, 20, 30, 40]` the installation completed successfully and you're ready
-to follow our docs
+This example creates one GPU buffer, multiplies each value by a uniform, and reads the result back.
+
+If the result contains `[10, 20, 30, 40]`, Volten is working in your environment.
 
 ```ts
 import { volten, Buffer, Kernel, Uniform } from '@volten/core';
@@ -47,4 +47,8 @@ console.log(await v.read(inout));
 
 ## Browser Support
 
-Volten uses WebGPU, so your code must run in an environment with WebGPU support. In browsers, `volten()` requests a `GPUAdapter` and `GPUDevice` from `navigator.gpu`.
+Volten needs WebGPU, and in a browser, that means `navigator.gpu` must be available.
+
+:::note[WebGPU mapping]
+`volten()` requests a `GPUAdapter` and `GPUDevice` unless you pass an existing adapter or device.
+:::

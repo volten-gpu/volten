@@ -5,7 +5,7 @@ description: A short map of the main pieces in @volten/core.
 
 ## Context
 
-Create a Volten context with `volten()`:
+Start by creating a Volten context:
 
 ```ts
 import { volten } from '@volten/core';
@@ -13,9 +13,9 @@ import { volten } from '@volten/core';
 const v = await volten();
 ```
 
-The context owns the WebGPU device and exposes the main execution helpers, including `v.pass()`, `v.run()`, `v.read()`, and `v.readDebug()`.
+The context is the object you use to create passes, run GPU work, read results, read debug output, and more
 
-Alternatively, if you'd like to re-use an existing WebGPU device, you can pass the device as one of the initialization options:
+If your app already owns a WebGPU device, pass it in:
 
 ```ts
 const v = await volten({ device });
@@ -23,11 +23,7 @@ const v = await volten({ device });
 
 ## Buffers and Uniforms
 
-Buffers will internally hold WebGPU's Storage Buffers, if you're unfamiliar with WebGPU's types,
-suffice to say Volten `Buffer`s are the go-to primitive to send large data into the GPU for
-read / write access. In Volten, Buffers are also always an array of values.
-
-`Uniform`s are normally used for small values shared with a kernel, usually for configuration.
+Use `Buffer` for arrays of values. Use `Uniform` for small configuration values.
 
 ```ts
 import { Buffer, Uniform } from '@volten/core';
@@ -36,10 +32,13 @@ const data = new Buffer([1, 2, 3, 4], 'f32', 'rw');
 const scale = new Uniform(2, 'f32');
 ```
 
+:::note[WebGPU mapping]
+`Buffer` maps to a storage buffer. Similarly, `Uniform` maps to a webGPU uniform buffer.
+:::
+
 ## Kernels
 
-Once you have defined the inputs and outputs of your kernel in terms of `Uniform`s
-and `Buffer`s, you can use the `Kernel` class to define WGSL compute work.
+Use `Kernel` for the WGSL code that runs on the GPU.
 
 ```ts
 import { Kernel } from '@volten/core';
@@ -53,20 +52,19 @@ const kernel = new Kernel(`
 
 Volten will internally handle pipeline creation, bindings and layouts, shader generation,
 buffer uploads, etc.
-Volten also injects the compute entry point and workgroup size around your kernel function,
-workgroup size is customizeable and will be explained in a future section of the docs.
+
+Volten also wraps your function with the compute entry point and workgroup size.
 
 ## Passes
 
-A pass connects a kernel with its resources, and creates a runnable `node` that can
-be executed with `v.run`
+A pass connects a kernel to its data and returns a runnable node.
 
 ```ts
 const node = v.pass(kernel, { data, scale });
 v.run(node);
 ```
 
-After execution, use `read()` to copy data back to the CPU:
+Read a concrete buffer when you need CPU-visible results:
 
 ```ts
 const result = await v.read(data);

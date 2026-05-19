@@ -1,0 +1,52 @@
+---
+title: Uniforms
+description: Use Uniform for small configuration values shared with a kernel.
+---
+
+Use `Uniform` for small values that configure a kernel.
+
+```ts
+import { Uniform } from '@volten/core';
+
+const multiplier = new Uniform(10, 'f32');
+const direction = new Uniform([1, 0, 0], 'vec3f');
+```
+
+Good examples are scalars, vectors, matrices, and small structs.
+
+## Updating a Uniform
+
+Use `set()` to update the value:
+
+```ts
+multiplier.set(20);
+direction.set([0, 1, 0]);
+```
+
+:::caution[Fixed size]
+The new value must have the same packed byte length as the original value.
+:::
+
+## Uniform Layout
+
+Most users can ignore uniform layout mode.
+
+```ts
+import { volten } from '@volten/core';
+
+const v = await volten({
+    uniformLayoutMode: 'auto'
+});
+```
+
+:::note[WebGPU mapping]
+Uniform buffers can use stricter layout rules than storage buffers. Volten resolves a layout mode for the context and packs uniforms to match it.
+:::
+
+## Labels
+
+```ts
+const params = new Uniform([1, 2, 3, 4], 'vec4f', {
+    label: 'simulation params'
+});
+```

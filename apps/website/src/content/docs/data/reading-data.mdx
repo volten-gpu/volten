@@ -1,0 +1,89 @@
+---
+title: Reading Data
+description: Read Buffer, RawBuffer, Handle, or Node results back to the CPU.
+---
+
+Use `v.read()` when JavaScript needs the result of GPU work.
+
+```ts
+const result = await v.read(buffer);
+```
+
+`v.read()` accepts a `Buffer`, `RawBuffer`, `Handle`, `Node`, or an array of read targets.
+
+:::note[WebGPU mapping]
+Readback copies GPU data into a temporary buffer that can be mapped by JavaScript.
+:::
+
+## Reading a Buffer
+
+Primitive buffers return typed arrays when Volten can infer the right type:
+
+```ts
+const values = new Buffer([1, 2, 3, 4], 'f32', 'rw');
+
+v.run(node);
+
+const result = await v.read(values);
+// Float32Array
+```
+
+Structured buffers return an `ArrayBuffer`. Decode it with `unpack()`.
+
+```ts
+import { unpack } from '@volten/core';
+
+const raw = await v.read(particles);
+const decoded = unpack(raw, Particle);
+
+console.log(decoded);
+// [
+//   { position: [0, 0, 0], velocity: [1, 0, 0], mass: 1 },
+//   { position: [1, 0, 0], velocity: [0, 1, 0], mass: 2 }
+// ]
+```
+
+## Reading a RawBuffer
+
+`RawBuffer` returns an `ArrayBuffer`.
+
+```ts
+const bytes = await v.read(rawBuffer);
+```
+
+## Reading a Node
+
+Reading a node returns a record of its declared outputs.
+
+```ts
+const kernel = new Kernel(
+    `
+      fn main(gid: vec3u) {
+        result[gid.x] = input[gid.x] * 2.0;
+      }
+    `,
+    {
+        outputs: ['result']
+    }
+);
+
+const node = v.pass(kernel, { input, result });
+v.run(node);
+
+const outputs = await v.read(node);
+// { result: Float32Array }
+```
+
+If a kernel has no declared outputs, read the concrete buffer directly.
+
+:::caution[Declared outputs]
+`v.read(node)` only works for kernels with declared outputs. For in-place kernels, read the buffer itself.
+:::
+
+## Reading Multiple Targets
+
+Pass an array to read multiple targets at once:
+
+```ts
+const [a, b] = await v.read([bufferA, bufferB]);
+```

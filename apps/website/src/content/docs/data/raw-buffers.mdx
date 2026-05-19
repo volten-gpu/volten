@@ -1,0 +1,73 @@
+---
+title: RawBuffer
+description: Use RawBuffer when you already have packed bytes or need a custom WGSL type.
+---
+
+Use `RawBuffer` when Volten should not pack your data.
+
+```ts
+import { RawBuffer } from '@volten/core';
+
+const packed = new ArrayBuffer(64);
+const data = new RawBuffer(packed, 'array<vec4f, 4>');
+```
+
+You provide the bytes and the WGSL type string.
+
+That makes `RawBuffer` useful for shapes Volten does not model directly yet, such as structs with runtime-sized arrays at the end of the struct:
+
+```wgsl
+struct Particle {
+  position: vec3f,
+  mass: f32,
+}
+
+struct ParticleBuffer {
+  count: u32,
+  particles: array<Particle>,
+}
+```
+
+```ts
+const packed = packParticleBufferSomehow(particles);
+const data = new RawBuffer(packed, 'ParticleBuffer', 'rw');
+```
+
+## Access Mode
+
+`RawBuffer` uses the same access modes as `Buffer`:
+
+```ts
+const input = new RawBuffer(packed, 'array<f32>', 'r');
+const inout = new RawBuffer(packed, 'array<f32>', 'rw');
+```
+
+`'r'` means shader read-only. `'rw'` means shader read-write.
+
+If omitted, the access mode defaults to `'rw'`.
+
+## Updating Bytes
+
+Use `set()` to replace the full byte contents:
+
+```ts
+data.set(new Uint8Array(64));
+```
+
+Use `update()` to write a byte range. The offset is measured in bytes:
+
+```ts
+data.update(new Uint8Array([1, 2, 3, 4]), 16);
+```
+
+:::caution[Fixed size]
+The byte length is fixed. If the packed data changes size, create a new `RawBuffer`.
+:::
+
+## When to Use It
+
+Reach for `RawBuffer` when:
+
+- you have a custom packed binary layout
+- you need a WGSL type that Volten's `struct()` and `array()` helpers cannot express cleanly yet
+- you want to handle packing and unpacking yourself

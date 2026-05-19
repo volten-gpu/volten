@@ -1,0 +1,73 @@
+---
+title: Structs and Arrays
+description: Describe structured GPU data with struct() and array().
+---
+
+Use `struct()` and `array()` when your buffer elements are more than plain numbers or vectors.
+
+```ts
+import { Buffer, struct } from '@volten/core';
+
+const Particle = struct('Particle', {
+    position: 'vec3f',
+    velocity: 'vec3f',
+    mass: 'f32'
+});
+
+const particles = new Buffer(
+    [
+        { position: [0, 0, 0], velocity: [1, 0, 0], mass: 1 },
+        { position: [1, 0, 0], velocity: [0, 1, 0], mass: 2 }
+    ],
+    Particle,
+    'rw'
+);
+```
+
+The struct name is used for generated WGSL type declarations.
+
+## Nested Structs
+
+Struct fields can reference other struct schemas:
+
+```ts
+const Aabb = struct('Aabb', {
+    min: 'vec3f',
+    max: 'vec3f'
+});
+
+const Particle = struct('Particle', {
+    position: 'vec3f',
+    velocity: 'vec3f',
+    bounds: Aabb
+});
+```
+
+## Fixed-Size Arrays
+
+Use `array()` for fixed-size arrays inside a schema:
+
+```ts
+import { array, struct } from '@volten/core';
+
+const Cell = struct('Cell', {
+    neighbors: array('vec3u', 8),
+    temperature: 'f32'
+});
+```
+
+Arrays can also be nested:
+
+```ts
+const Tile = struct('Tile', {
+    samples: array(array('f32', 4), 4)
+});
+```
+
+## Unsupported Shapes
+
+For layouts Volten cannot describe directly yet, use `RawBuffer` and provide pre-packed bytes.
+
+:::note[WebGPU mapping]
+Runtime-sized trailing arrays are an advanced WGSL shape. Use `RawBuffer` for those until Volten grows a first-class helper.
+:::

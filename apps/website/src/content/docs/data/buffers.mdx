@@ -1,0 +1,74 @@
+---
+title: Buffers
+description: Use Buffer for arrays of values that kernels can read or write.
+---
+
+Use `Buffer` when a kernel needs an array of values.
+
+```ts
+import { Buffer } from '@volten/core';
+
+const values = new Buffer([1, 2, 3, 4], 'f32');
+const output = new Buffer([0, 0, 0, 0], 'f32', 'rw');
+```
+
+The second argument is the element type. Volten uses it to pack the data and generate the shader binding.
+
+## Access Mode
+
+The third argument controls shader access:
+
+```ts
+const input = new Buffer([1, 2, 3, 4], 'f32', 'r');
+const inout = new Buffer([1, 2, 3, 4], 'f32', 'rw');
+```
+
+`'r'` generates a read-only storage binding. `'rw'` generates a read-write storage binding.
+
+If omitted, the access mode defaults to `'rw'`.
+
+This is shader access, not CPU access. JavaScript can still upload data with `set()` or `update()`.
+
+## Element Count and Byte Length
+
+Buffers have a fixed element count.
+
+```ts
+const values = new Buffer([1, 2, 3, 4], 'f32');
+
+values.count; // 4
+values.stride; // bytes per element
+values.byteLength; // count * stride
+```
+
+:::caution[Fixed size]
+`set()` and `update()` can change contents, but they cannot resize the buffer. Create a new `Buffer` when the element count changes.
+:::
+
+:::note[WebGPU mapping]
+`stride` includes WGSL layout padding. For example, `vec3f` has a 16-byte stride when stored in an array.
+:::
+
+## Updating Data
+
+Use `set()` to replace the full contents without changing the element count:
+
+```ts
+values.set([10, 20, 30, 40]);
+```
+
+Use `update()` to replace a contiguous range. The offset is measured in elements:
+
+```ts
+values.update([99, 100], 1);
+```
+
+## Labels
+
+Labels help when inspecting GPU resources:
+
+```ts
+const positions = new Buffer([[0, 0, 0]], 'vec3f', 'rw', {
+    label: 'particle positions'
+});
+```
