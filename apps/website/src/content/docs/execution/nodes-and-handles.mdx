@@ -1,0 +1,65 @@
+---
+title: Nodes and Handles
+description: Chain compute passes with nodes and handles.
+---
+
+A node represents one prepared compute pass.
+
+```ts
+const A = v.pass(kernel, { input, output });
+```
+
+Every buffer-like binding on a node gets a handle with the same name.
+
+```ts
+A.input;
+A.output;
+```
+
+Pass handles into later nodes to create dependencies.
+
+```ts
+const A = v.pass(doubleKernel, { input, output: mid });
+const B = v.pass(offsetKernel, { input: A.output, output: result });
+
+v.run(B);
+```
+
+Running `B` also runs `A`, because `B` depends on `A.output`.
+
+## In-Place Chaining
+
+Handles are created for in-place bindings too.
+
+```ts
+const A = v.pass(kernel, { data });
+const B = v.pass(kernel, { data: A.data });
+const C = v.pass(kernel, { data: B.data });
+
+v.run(C);
+```
+
+This lets you chain work even when a kernel does not declare outputs.
+
+## Declared Outputs
+
+Declared outputs matter when reading a node.
+
+```ts
+const kernel = new Kernel(`...`, {
+    outputs: ['result']
+});
+
+const node = v.pass(kernel, { input, result });
+const output = await v.read(node);
+```
+
+Without declared outputs, read a specific buffer or handle.
+
+```ts
+const data = await v.read(node.data);
+```
+
+:::caution[Reserved names]
+Public handle names cannot start with `_`, because Volten uses `_`-prefixed properties for internal node state.
+:::

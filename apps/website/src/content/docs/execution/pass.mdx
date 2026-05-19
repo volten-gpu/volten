@@ -1,0 +1,64 @@
+---
+title: v.pass()
+description: Create a runnable node from a kernel and its bindings.
+---
+
+`v.pass()` connects a `Kernel` to its data.
+
+```ts
+const node = v.pass(kernel, {
+    input,
+    output,
+    multiplier
+});
+```
+
+It does not submit GPU work by itself. It prepares a node that can be executed later with `v.run()` or `v.wait()`.
+
+## Signature
+
+```ts
+const node = v.pass(kernel, bindings, options);
+```
+
+| Argument | Meaning |
+| --- | --- |
+| `kernel` | A `Kernel` instance |
+| `bindings` | `Buffer`, `RawBuffer`, `Uniform`, or `Handle` values |
+| `options` | Optional pass-level overrides |
+
+## Pass Options
+
+```ts
+const node = v.pass(kernel, { input, output }, {
+    label: 'scale pass',
+    threads: input.count
+});
+```
+
+`threads` overrides the kernel's thread configuration for this pass.
+
+`label` gives the node a readable name in debug output and browser GPU tools.
+
+`debug` enables shader debugging for this pass.
+
+```ts
+const node = v.pass(kernel, { input, output }, {
+    debug: true
+});
+```
+
+## What v.pass() Does
+
+When you call `v.pass()`, Volten:
+
+- validates the kernel and bindings
+- resolves thread bounds and dispatch size
+- generates WGSL bindings
+- assembles the final shader
+- creates or reuses a compute pipeline
+- returns a node with handles for buffer-like bindings
+
+:::note
+`v.pass()` is where the graph is built. `v.run()` and `v.wait()` are where the graph is submitted.
+:::

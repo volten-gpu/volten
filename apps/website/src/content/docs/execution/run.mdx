@@ -1,0 +1,52 @@
+---
+title: v.run()
+description: Submit one or more nodes without waiting for completion.
+---
+
+Use `v.run()` to submit GPU work.
+
+```ts
+v.run(node);
+```
+
+`v.run()` does not wait for the GPU to finish.
+
+## Running a Chain
+
+If a node depends on earlier nodes, Volten runs the dependency chain in order.
+
+```ts
+const A = v.pass(K1, { input, output: mid });
+const B = v.pass(K2, { input: A.output, output: result });
+
+v.run(B);
+```
+
+Here, `A` runs before `B`.
+
+## Running Multiple Nodes
+
+Pass an array to run multiple terminal nodes in one submission.
+
+```ts
+v.run([A, B]);
+```
+
+Volten merges their reachable graphs, removes duplicate shared nodes, and submits one command buffer.
+
+## Shared Buffers
+
+If independent nodes touch the same concrete buffer, Volten preserves the array order.
+
+```ts
+const A = v.pass(K1, { data });
+const B = v.pass(K2, { data });
+
+v.run([A, B]);
+```
+
+`A` runs before `B`.
+
+:::note[WebGPU mapping]
+Volten may encode multiple independent dispatches into the same compute pass, but it starts a new compute pass when a dependency requires memory visibility.
+:::

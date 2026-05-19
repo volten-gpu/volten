@@ -50,6 +50,17 @@ export default defineConfig({
                         { slug: 'kernels/threads-and-workgroups' },
                         { slug: 'kernels/bounds-guards' }
                     ]
+                },
+                {
+                    label: 'Execution',
+                    items: [
+                        { slug: 'execution/pass' },
+                        { slug: 'execution/nodes-and-handles' },
+                        { slug: 'execution/run' },
+                        { slug: 'execution/wait' },
+                        { slug: 'execution/read' },
+                        { slug: 'execution/destroy' }
+                    ]
                 }
             ]
         })

@@ -1,0 +1,55 @@
+---
+title: v.destroy()
+description: Release Volten-owned resources for a node graph.
+---
+
+Use `v.destroy()` when you are done with a node graph and want to release Volten-owned internal resources.
+
+```ts
+const node = v.pass(kernel, { data });
+v.run(node);
+
+v.destroy(node);
+```
+
+It walks the node and its dependencies.
+
+## What It Destroys
+
+`v.destroy()` destroys resources created by Volten for the node graph, such as hidden bounds-guard uniforms and debug buffers.
+
+It does not destroy user-created resources:
+
+- `Buffer`
+- `RawBuffer`
+- `Uniform`
+
+```ts
+v.destroy(node);
+
+// User buffers are still yours.
+data.set([1, 2, 3, 4]);
+```
+
+## Multiple Nodes
+
+```ts
+v.destroy([A, B]);
+```
+
+Shared dependencies are visited once.
+
+## Reuse After Destroy
+
+Calling `v.destroy(node)` is safe more than once.
+
+You can also run the node again later. Volten recreates the internal resources it needs.
+
+```ts
+v.destroy(node);
+v.run(node);
+```
+
+:::caution
+`v.destroy()` is not a replacement for destroying your own `Buffer`, `RawBuffer`, or `Uniform` objects. Call `.destroy()` on those resources directly when you want to release their GPU buffers.
+:::
