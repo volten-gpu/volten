@@ -1,0 +1,76 @@
+---
+title: Writing Kernels
+description: Write the WGSL function that Volten will run as a compute kernel.
+---
+
+A `Kernel` contains the WGSL code that runs on the GPU.
+
+```ts
+import { Kernel } from '@volten/core';
+
+const scale = new Kernel(`
+  fn main(gid: vec3u) {
+    output[gid.x] = input[gid.x] * multiplier;
+  }
+`);
+```
+
+You write a `main` function. Volten adds the compute entry point, workgroup size, bindings, and safety guard around it.
+
+## Builtin Shorthands
+
+Volten expands a few parameter names in `main`:
+
+| Name | Type | Meaning |
+| --- | --- | --- |
+| `gid` | `vec3u` or `vec3<u32>` | Global invocation id |
+| `lid` | `u32` | Local invocation index |
+| `lid3` | `vec3u` or `vec3<u32>` | Local invocation id |
+| `wid` | `vec3u` or `vec3<u32>` | Workgroup id |
+| `nwg` | `vec3u` or `vec3<u32>` | Number of workgroups |
+
+```ts
+const kernel = new Kernel(`
+  fn main(gid: vec3u, lid: u32) {
+    data[gid.x] = f32(lid);
+  }
+`);
+```
+
+You can also write the full WGSL builtin syntax yourself.
+
+```wgsl
+fn main(@builtin(global_invocation_id) gid: vec3u) {
+  data[gid.x] = data[gid.x] * 2.0;
+}
+```
+
+## Helper Functions
+
+Only the function named `main` is treated as the kernel entry point. Other functions are left alone.
+
+```ts
+const kernel = new Kernel(`
+  fn square(x: f32) -> f32 {
+    return x * x;
+  }
+
+  fn main(gid: vec3u) {
+    data[gid.x] = square(data[gid.x]);
+  }
+`);
+```
+
+## Labels
+
+Add a label when you want clearer debug output and browser GPU tooling names.
+
+```ts
+const kernel = new Kernel(`...`, {
+    label: 'scale values'
+});
+```
+
+:::note[WebGPU mapping]
+Volten injects `@compute @workgroup_size(...)` for the final shader. You do not write those attributes unless you opt into lower-level control later.
+:::

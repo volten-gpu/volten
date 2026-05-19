@@ -1,0 +1,73 @@
+---
+title: Bounds Guards
+description: Understand Volten's automatic dispatch bounds guard.
+---
+
+Volten normally protects kernels from extra invocations at the edge of a dispatch.
+
+```ts
+const kernel = new Kernel(`
+  fn main(gid: vec3u) {
+    data[gid.x] = data[gid.x] * 2.0;
+  }
+`);
+```
+
+If `data.count` is `100` and the workgroup size is `64`, WebGPU must dispatch two workgroups. That creates up to `128` invocations. Volten injects a guard so invocations `100..127` return before calling your code.
+
+## Why This Exists
+
+Most kernels are written against the logical data size, not the rounded-up dispatch size.
+
+```wgsl
+fn main(gid: vec3u) {
+  data[gid.x] = data[gid.x] * 2.0;
+}
+```
+
+Without a guard, `gid.x` could go past the end of `data`.
+
+## Manual Bounds
+
+Advanced kernels can opt out.
+
+```ts
+const kernel = new Kernel(
+    `
+      fn main(gid: vec3u) {
+        if (gid.x >= count) {
+          return;
+        }
+
+        data[gid.x] = data[gid.x] * 2.0;
+      }
+    `,
+    {
+        unsafeManualBounds: true,
+        threads: 128
+    }
+);
+
+const count = new Uniform(data.count, 'u32');
+const node = v.pass(kernel, { data, count });
+```
+
+Use this only when your WGSL handles every out-of-range invocation correctly.
+
+## Barriers
+
+Kernels that use `workgroupBarrier()` or `storageBarrier()` need special care.
+
+```wgsl
+fn main(gid: vec3u, lid: u32) {
+  workgroupBarrier();
+}
+```
+
+Volten's automatic guard returns early before your code runs. That is unsafe for some barrier patterns, because not every invocation reaches the same barrier.
+
+If a barrier kernel would need a partial guarded workgroup, Volten throws. Fix it by making the thread count an exact multiple of `workgroupSize`, or by using `unsafeManualBounds: true` and handling bounds manually.
+
+:::caution[Sharp edge]
+Only use `unsafeManualBounds: true` when you are comfortable reasoning about every dispatched invocation. Volten will stop protecting you from out-of-bounds indexing.
+:::

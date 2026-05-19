@@ -1,0 +1,107 @@
+---
+title: Threads and Workgroups
+description: Control how many invocations a kernel launches.
+---
+
+`threads` describes how many logical invocations your kernel should run.
+
+```ts
+const kernel = new Kernel(`...`, {
+    threads: 1024
+});
+```
+
+Volten divides that by the workgroup size to compute the actual dispatch.
+
+## Automatic Inference
+
+If there is one clear input buffer, Volten can infer the thread count from its element count.
+
+```ts
+const input = new Buffer([1, 2, 3, 4], 'f32', 'r');
+const output = new Buffer([0, 0, 0, 0], 'f32', 'rw');
+
+const kernel = new Kernel(`...`, {
+    outputs: ['output']
+});
+
+const node = v.pass(kernel, { input, output });
+```
+
+Here, we have two buffers, one is clearly specified for output,
+and since there is only another buffer available (input) then `input.count` is used
+as the logical thread count.
+
+## Kernel-Level Threads
+
+You can use the `threads` kernel property to define which input buffer is going to be used
+to determine how many threads to run. In this example, since threads is set to 'input', `input.count`
+will be used to determine how many threads to run (in this case, as many threads as there are
+elements inside `input`)
+
+```ts
+const kernel = new Kernel(`...`, {
+    threads: 'input'
+});
+```
+
+Use a function when the count depends on custom shapes or multiple bindings.
+
+```ts
+const kernel = new Kernel(`...`, {
+    threads: ({ input }) => (input as Buffer).count / 2
+});
+
+const kernel = new Kernel(`...`, {
+    threads: ({ input1, input2 }) =>
+        (input1 as Buffer).count + (input2 as Buffer).count
+});
+```
+
+Functions can return a number, `[x, y]`, or `[x, y, z]`. For most 2D cases, prefer passing the explicit dimensions at pass time.
+
+## Pass-Time Threads
+
+Pass-time `threads` overrides the kernel option.
+
+```ts
+const node = v.pass(
+    kernel,
+    { image },
+    {
+        threads: [width, height]
+    }
+);
+```
+
+Use this when the same kernel runs over different shapes.
+
+## Workgroup Size
+
+`workgroupSize` controls how invocations are grouped.
+
+```ts
+const kernel = new Kernel(`...`, {
+    threads: 'input',
+    workgroupSize: [256]
+});
+```
+
+The default is `[64, 1, 1]`.
+
+:::note[WebGPU mapping]
+`threads` is total logical invocations. `workgroupSize` becomes `@workgroup_size(x, y, z)`. The final dispatch is `ceil(threads / workgroupSize)` per axis.
+:::
+
+## RawBuffer Cannot Infer Count
+
+`RawBuffer` tracks bytes, not elements. Specify `threads` explicitly when a pass only has raw buffers.
+
+```ts
+const kernel = new Kernel(`...`, {
+    threads: 1024
+});
+
+// Alternatively:
+const node = v.pass(kernel, { rawInputBuffer }, { threads: 1024 });
+```

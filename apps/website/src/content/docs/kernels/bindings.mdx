@@ -1,0 +1,78 @@
+---
+title: Bindings
+description: Connect kernel variable names to Volten resources.
+---
+
+Bindings are the resources a kernel can access.
+
+```ts
+const node = v.pass(kernel, {
+    input,
+    output,
+    multiplier
+});
+```
+
+The object keys become WGSL variable names. If the shader uses `input`, the bindings object must contain `input`.
+
+```wgsl
+fn main(gid: vec3u) {
+  output[gid.x] = input[gid.x] * multiplier;
+}
+```
+
+## Supported Values
+
+Bindings can be:
+
+| Value       | Use                                        |
+| ----------- | ------------------------------------------ |
+| `Buffer`    | Packed storage-buffer data                 |
+| `RawBuffer` | User-packed storage-buffer data            |
+| `Uniform`   | Small configuration values                 |
+| `Handle`    | A buffer handle from a previous `v.pass()` |
+
+Plain numbers, strings, and objects are not bindings. Wrap scalar configuration values in `Uniform`.
+
+```ts
+const multiplier = new Uniform(2, 'f32');
+
+const node = v.pass(kernel, { input, output, multiplier });
+```
+
+## Handles
+
+Every buffer-like binding on a node gets a handle. You can pass that handle into another node.
+
+```ts
+const A = v.pass(doubleKernel, { input, output: mid });
+const B = v.pass(offsetKernel, { input: A.output, output: result });
+```
+
+Volten records the dependency, so running `B` also runs `A` first.
+
+```ts
+v.run(B);
+```
+
+## Generated Declarations
+
+Volten generates WGSL declarations from the binding values.
+
+```ts
+const input = new Buffer([1, 2, 3, 4], 'f32', 'r');
+const output = new Buffer([0, 0, 0, 0], 'f32', 'rw');
+const multiplier = new Uniform(2, 'f32');
+```
+
+Equivalent generated declarations:
+
+```wgsl
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> output: array<f32>;
+@group(0) @binding(2) var<uniform> multiplier: f32;
+```
+
+:::caution[Reserved names]
+Volten internally uses a number of reserved binding names, such as `_volten_dispatch_bounds_guard_uniform`.
+:::

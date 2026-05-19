@@ -1,0 +1,94 @@
+---
+title: Outputs
+description: Declare which kernel bindings should be treated as outputs.
+---
+
+Kernel outputs tell Volten which bindings should be returned when you read a node.
+
+```ts
+const kernel = new Kernel(
+    `
+      fn main(gid: vec3u) {
+        result[gid.x] = input[gid.x] * 2.0;
+      }
+    `,
+    {
+        outputs: ['result']
+    }
+);
+```
+
+Then read the node:
+
+```ts
+const node = v.pass(kernel, { input, result });
+v.run(node);
+
+const output = await v.read(node);
+// { result: Float32Array [...] }
+```
+
+## Output Names
+
+The simplest form is an array of binding names.
+
+```ts
+const kernel = new Kernel(`...`, {
+    outputs: ['result', 'debug']
+});
+```
+
+Those names must match buffer-like bindings passed to `v.pass()`.
+
+```ts
+const node = v.pass(kernel, {
+    input,
+    result,
+    debug
+});
+```
+
+## Output Metadata
+
+You can also use object form to describe an output.
+
+```ts
+const kernel = new Kernel(`...`, {
+    outputs: {
+        result: { definedBy: 'input' }
+    }
+});
+```
+
+`definedBy` says the output has the same shape as another binding.
+
+```ts
+const reduce = new Kernel(`...`, {
+    outputs: {
+        sum: { type: 'array<f32>', size: 1 }
+    }
+});
+```
+
+:::caution[v0 behavior]
+In v0, output declarations do not allocate buffers for you. Provide the output buffer in `v.pass()`. The declaration tells Volten which node handles count as outputs for `v.read(node)` and thread inference.
+:::
+
+## In-Place Kernels
+
+You do not need declared outputs for in-place work.
+
+```ts
+const kernel = new Kernel(`
+  fn main(gid: vec3u) {
+    data[gid.x] = data[gid.x] * 2.0;
+  }
+`);
+
+const node = v.pass(kernel, { data });
+v.run(node);
+
+const result = await v.read(data);
+```
+
+If a kernel has no declared outputs, read the concrete buffer or handle directly.

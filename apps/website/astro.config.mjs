@@ -40,6 +40,16 @@ export default defineConfig({
                         { slug: 'data/structs-and-arrays' },
                         { slug: 'data/reading-data' }
                     ]
+                },
+                {
+                    label: 'Kernels',
+                    items: [
+                        { slug: 'kernels/writing-kernels' },
+                        { slug: 'kernels/bindings' },
+                        { slug: 'kernels/outputs' },
+                        { slug: 'kernels/threads-and-workgroups' },
+                        { slug: 'kernels/bounds-guards' }
+                    ]
                 }
             ]
         })
