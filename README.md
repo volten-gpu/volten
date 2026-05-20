@@ -45,10 +45,12 @@ const kernel = new Kernel(`
   fn main(gid: vec3u) {
     inout[gid.x] = inout[gid.x] * mult;
 
-    if (gid.x == 2) {
+    if (gid.x == 2u) {
       enableDebug();
-      debugF32("f32 value debug", inout[gid.x]);
-    }  
+    }
+
+    // Only gid.x == 2u will emit debug logs
+    debugF32("f32 value debug", inout[gid.x]);
   }
 `);
 

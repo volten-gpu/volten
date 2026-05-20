@@ -1,0 +1,84 @@
+---
+title: v.readDebug()
+description: Read and inspect shader debug output.
+---
+
+Use `v.readDebug(node)` after running a debug-enabled node.
+
+```ts
+const node = v.pass(kernel, bindings, { debug: true });
+
+v.run(node);
+
+const result = await v.readDebug(node);
+```
+
+## Print Logs
+
+For quick inspection, call `print()`.
+
+```ts
+result.print();
+```
+
+Console output:
+
+```txt
+[1,0,0] vector: 0, 1, 2, 3
+```
+
+The prefix is the invocation id that produced the log: `[gid.x,gid.y,gid.z]`.
+
+## Read Logs Yourself
+
+`logs` is an array of decoded records.
+
+```ts
+for (const log of result.logs) {
+    console.log(log.gid, log.kind, log.message, log.value);
+}
+```
+
+Each log has:
+
+| Field | Meaning |
+| --- | --- |
+| `gid` | Invocation id as `[x, y, z]` |
+| `kind` | Logged value kind, such as `f32` or `vec4f` |
+| `message` | Optional message from the shader |
+| `value` | Number or number array |
+
+## Buffer Size
+
+Debug records are stored in a hidden debug buffer. The default payload size is `16 KiB`.
+
+Increase it when you expect more logs.
+
+```ts
+const node = v.pass(kernel, bindings, {
+    debug: { bufferSize: 64 * 1024 }
+});
+```
+
+`bufferSize` is measured in bytes.
+
+## Dropped Logs
+
+If the debug buffer fills up, Volten keeps the records that fit and reports how many were dropped.
+
+```ts
+if (result.dropped > 0 || result.truncated) {
+    console.warn('Some debug logs were dropped.');
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `dropped` | Records the shader tried to write after the buffer was full |
+| `usedWords` | Number of 32-bit words used by written records |
+| `truncated` | The recorded cursor moved past the available payload |
+| `bufferSize` | Debug payload size in bytes |
+
+:::note[Debug output vs data output]
+`v.readDebug()` reads only debug logs. Use `v.read()` to read buffers, node outputs, or handles.
+:::

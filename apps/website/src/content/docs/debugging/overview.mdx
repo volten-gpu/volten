@@ -1,0 +1,67 @@
+---
+title: Debugging Overview
+description: Inspect values produced inside a kernel.
+---
+
+Volten debugging is opt-in per node.
+
+You can enable debugging when you create the node,
+add debug functions in WGSL, run the node, then read its debug output.
+
+```ts
+const kernel = new Kernel(`
+  fn main(gid: vec3u) {
+    inout[gid.x] = inout[gid.x] * mult;
+
+    if (gid.x == 2u) {
+      enableDebug();
+    }
+
+    // Only gid.x == 2u will emit debug logs
+    debugF32("value", inout[gid.x]);
+  }
+`);
+
+const node = v.pass(kernel, { inout, mult }, { debug: true });
+
+v.run(node);
+
+const debug = await v.readDebug(node);
+debug.print();
+```
+
+Console output:
+
+```txt
+[2,0,0] value: 30
+```
+
+output is defined as: `[global invocation id] message: value`
+
+## The Debugging Loop
+
+1. Create a node with `{ debug: true }`.
+2. Call `enableDebug()` inside the invocation you want to inspect.
+3. Log later values with a typed helper like `debugF32()` or `debugVec4f()`.
+4. Call `v.readDebug(node)` after `v.run(node)`.
+
+## Keep Logs Narrow
+
+GPU kernels may run thousands of invocations. A debug call inside every invocation can fill the debug buffer quickly.
+
+Prefer a condition around `enableDebug()`.
+
+```wgsl
+if (gid.x == 0u) {
+  enableDebug();
+}
+
+// Only gid.x == 0u emits this log.
+debugVec3f("first item", data[gid.x]);
+```
+
+`enableDebug()` applies only to the current invocation. From that point on, debug calls in that invocation emit logs. Other invocations keep running normally, but their debug calls stay silent.
+
+:::caution[Opt-in node]
+`v.readDebug(node)` only works for nodes created with debug support. Use `v.pass(kernel, bindings, { debug: true })`.
+:::

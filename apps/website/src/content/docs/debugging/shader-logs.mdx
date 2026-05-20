@@ -1,0 +1,57 @@
+---
+title: Shader Logs
+description: Log scalar, vector, and matrix values from WGSL.
+---
+
+Debug logs are written from WGSL with typed helper functions after the current invocation has debugging enabled.
+
+```wgsl
+debugF32("weight", weight);
+```
+
+The message is optional.
+
+```wgsl
+debugF32(weight);
+debugF32("weight", weight);
+```
+
+## Supported Helpers
+
+| Helper                           | Value     |
+| -------------------------------- | --------- |
+| `debugF32()`                     | `f32`     |
+| `debugU32()`                     | `u32`     |
+| `debugI32()`                     | `i32`     |
+| `debugVec2()` / `debugVec2f()`   | `vec2f`   |
+| `debugVec3()` / `debugVec3f()`   | `vec3f`   |
+| `debugVec4()` / `debugVec4f()`   | `vec4f`   |
+| `debugMat4()` / `debugMat4x4f()` | `mat4x4f` |
+
+Volten uses typed helpers so the log format is known before the shader runs.
+
+## Messages
+
+Messages must be string literals.
+
+```wgsl
+debugF32("current value", value);
+```
+
+This keeps debug metadata static while the GPU records only numeric values.
+
+## Gated Logs
+
+Use `enableDebug()` close to the value you care about.
+
+```wgsl
+if (gid.x == index) {
+  enableDebug();
+}
+
+// Only the enabled invocation emits these logs.
+debugU32("gid.x", gid.x);
+debugF32("value", data[gid.x]);
+```
+
+Without `enableDebug()`, debug helpers do nothing for that invocation. After `enableDebug()`, later debug helpers in that invocation emit logs.

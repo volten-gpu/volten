@@ -62,6 +62,14 @@ export default defineConfig({
                         { slug: 'execution/read' },
                         { slug: 'execution/destroy' }
                     ]
+                },
+                {
+                    label: 'Debugging',
+                    items: [
+                        { slug: 'debugging/overview', label: 'Overview' },
+                        { slug: 'debugging/shader-logs' },
+                        { slug: 'debugging/read-debug' }
+                    ]
                 }
             ]
         })
