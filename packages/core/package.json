@@ -19,7 +19,7 @@
     "webgpu-compute",
     "shader-debugging"
   ],
-  "homepage": "https://github.com/volten-gpu/volten#readme",
+  "homepage": "https://volten-gpu.github.io/",
   "bugs": {
     "url": "https://github.com/volten-gpu/volten/issues"
   },

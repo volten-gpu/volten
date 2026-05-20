@@ -32,5 +32,5 @@ console.log(await v.read(inout));
 
 ## Documentation
 
-Full documentation is in progress. See the main repository README:
+See the main repository README:
 https://github.com/volten-gpu/volten

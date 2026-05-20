@@ -12,6 +12,12 @@
 
 Volten simplifies WebGPU compute shader development with an API designed for logic, not logistics.
 
+### Documentation
+
+Start here:
+
+https://volten-gpu.github.io/getting-started/
+
 ### Quick start
 
 This is how simple it is in Volten to run a compute shader and read back the result:
@@ -69,10 +75,6 @@ Install the public core package:
 ```sh
 pnpm add @volten/core
 ```
-
-### Documentation
-
-Documentation is still in progress, but you can get a preview by running the `apps/website` folder
 
 ### Packages
 
