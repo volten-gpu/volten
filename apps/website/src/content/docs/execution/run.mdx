@@ -11,9 +11,40 @@ v.run(node);
 
 `v.run()` does not wait for the GPU to finish.
 
-## Running a Chain
+## Running Multiple Nodes
 
-If a node depends on earlier nodes, Volten runs the dependency chain in order.
+Pass an array to batch multiple nodes in one submission.
+
+```ts
+const A = v.pass(K1, { data });
+const B = v.pass(K2, { otherData });
+
+v.run([A, B]);
+```
+
+This is the simplest way to batch work in Volten.
+
+## Shared Buffers
+
+When batched passes use different data, they can be submitted together without needing to know about each other.
+
+When batched passes use the same data, order matters.
+
+```ts
+const A = v.pass(K1, { data });
+const B = v.pass(K2, { data });
+
+v.run([A, B]);
+```
+
+Both nodes touch the same concrete buffer, so Volten preserves the array order: `A` runs before `B`.
+
+That means `v.run([A, B])` is still safe for simple sequential work over the same buffer.
+
+## When One Pass Needs Another
+
+If one pass should consume a buffer produced by another pass,
+to make the dependency requirement clear, you can also use a handle from the first node.
 
 ```ts
 const A = v.pass(K1, { input, output: mid });
@@ -24,28 +55,7 @@ v.run(B);
 
 Here, `A` runs before `B`.
 
-## Running Multiple Nodes
-
-Pass an array to run multiple terminal nodes in one submission.
-
-```ts
-v.run([A, B]);
-```
-
-Volten merges their reachable graphs, removes duplicate shared nodes, and submits one command buffer.
-
-## Shared Buffers
-
-If independent nodes touch the same concrete buffer, Volten preserves the array order.
-
-```ts
-const A = v.pass(K1, { data });
-const B = v.pass(K2, { data });
-
-v.run([A, B]);
-```
-
-`A` runs before `B`.
+The next page covers nodes, handles, and Volten's dependency graph in more detail.
 
 :::note[WebGPU mapping]
 Volten may encode multiple independent dispatches into the same compute pass, but it starts a new compute pass when a dependency requires memory visibility.

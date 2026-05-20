@@ -1,9 +1,9 @@
 ---
 title: Nodes and Handles
-description: Chain compute passes with nodes and handles.
+description: Pass data from one node into another.
 ---
 
-A node represents one prepared compute pass.
+A node is the value returned by `v.pass()`.
 
 ```ts
 const A = v.pass(kernel, { input, output });
@@ -16,7 +16,8 @@ A.input;
 A.output;
 ```
 
-Pass handles into later nodes to create dependencies.
+You can use handles when one pass consumes data from another pass,
+to make the dependency requirement clear:
 
 ```ts
 const A = v.pass(doubleKernel, { input, output: mid });
@@ -26,6 +27,8 @@ v.run(B);
 ```
 
 Running `B` also runs `A`, because `B` depends on `A.output`.
+
+This is Volten's graph model: handles connect nodes into a dependency graph, and `v.run(B)` runs the work needed to produce `B`.
 
 ## In-Place Chaining
 
@@ -39,7 +42,8 @@ const C = v.pass(kernel, { data: B.data });
 v.run(C);
 ```
 
-This lets you chain work even when a kernel does not declare outputs.
+This lets you chain work in a way that improves the readability of the dependency chain, as
+well as letting you created more complex GPU compute execution dependency graphs
 
 ## Declared Outputs
 
@@ -54,7 +58,8 @@ const node = v.pass(kernel, { input, result });
 const output = await v.read(node);
 ```
 
-Without declared outputs, read a specific buffer or handle.
+If you choose to not declare outputs on your kernel, you can
+alternatively read a specific buffer or handle:
 
 ```ts
 const data = await v.read(node.data);

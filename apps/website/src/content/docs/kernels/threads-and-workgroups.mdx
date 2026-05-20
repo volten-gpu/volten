@@ -28,16 +28,25 @@ const kernel = new Kernel(`...`, {
 const node = v.pass(kernel, { input, output });
 ```
 
-Here, we have two buffers, one is clearly specified for output,
-and since there is only another buffer available (input) then `input.count` is used
-as the logical thread count.
+Here, `output` is declared as an output, so `input.count` is used as the logical thread count.
+
+When there are multiple possible input buffers, Volten cannot guess which shape should drive the dispatch. Set `threads` explicitly.
+
+```ts
+const kernel = new Kernel(`...`, {
+    threads: 'positions'
+});
+
+const node = v.pass(kernel, {
+    positions,
+    velocities,
+    output
+});
+```
 
 ## Kernel-Level Threads
 
-You can use the `threads` kernel property to define which input buffer is going to be used
-to determine how many threads to run. In this example, since threads is set to 'input', `input.count`
-will be used to determine how many threads to run (in this case, as many threads as there are
-elements inside `input`)
+Use the `threads` kernel property when the dispatch shape is part of the kernel's normal behavior.
 
 ```ts
 const kernel = new Kernel(`...`, {

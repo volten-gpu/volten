@@ -1,6 +1,6 @@
 ---
 title: v.pass()
-description: Create a runnable node from a kernel and its bindings.
+description: Prepare a kernel with the data it should use.
 ---
 
 `v.pass()` connects a `Kernel` to its data.
@@ -13,7 +13,9 @@ const node = v.pass(kernel, {
 });
 ```
 
-It does not submit GPU work by itself. It prepares a node that can be executed later with `v.run()` or `v.wait()`.
+It does not submit GPU work by itself. It prepares work that can be executed later with `v.run()` or `v.wait()`.
+
+The returned value is a node.
 
 ## Signature
 
@@ -57,8 +59,8 @@ When you call `v.pass()`, Volten:
 - generates WGSL bindings
 - assembles the final shader
 - creates or reuses a compute pipeline
-- returns a node with handles for buffer-like bindings
+- returns a runnable node
 
 :::note
-`v.pass()` is where the graph is built. `v.run()` and `v.wait()` are where the graph is submitted.
+`v.pass()` prepares work. `v.run()` and `v.wait()` submit it.
 :::

@@ -13,7 +13,7 @@ import { volten } from '@volten/core';
 const v = await volten();
 ```
 
-The context is the object you use to create passes, run GPU work, read results, read debug output, and more
+The context is the object you use to create passes, run GPU work, read results, read debug output, and more.
 
 If your app already owns a WebGPU device, pass it in:
 
@@ -33,7 +33,7 @@ const scale = new Uniform(2, 'f32');
 ```
 
 :::note[WebGPU mapping]
-`Buffer` maps to a storage buffer. Similarly, `Uniform` maps to a webGPU uniform buffer.
+`Buffer` maps to a storage buffer. `Uniform` maps to a WebGPU uniform buffer.
 :::
 
 ## Kernels
@@ -54,6 +54,10 @@ Volten will internally handle pipeline creation, bindings and layouts, shader ge
 buffer uploads, etc.
 
 Volten also wraps your function with the compute entry point and workgroup size.
+
+:::note[Thread count]
+Volten can often infer how many invocations to run from one clear input buffer. If a pass has multiple possible input buffers, only raw buffers, or a shape that is not one thread per element, set `threads` on the kernel or pass.
+:::
 
 ## Passes
 

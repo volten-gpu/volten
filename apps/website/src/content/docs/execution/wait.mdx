@@ -9,17 +9,17 @@ Use `v.wait()` when JavaScript must wait until GPU work is finished.
 await v.wait(node);
 ```
 
-It submits the node just like `v.run()`, then waits for completion.
+It submits work just like `v.run()`, then waits for completion.
 
 ## Multiple Nodes
 
-`v.wait()` also accepts an array of terminal nodes.
+`v.wait()` also accepts an array.
 
 ```ts
 await v.wait([A, B]);
 ```
 
-Volten schedules the combined graph and waits for the submitted work.
+This is the waiting version of `v.run([A, B])`.
 
 ## When to Use It
 
@@ -32,5 +32,5 @@ Use `v.wait()` when:
 You do not need `v.wait()` before `v.read()`. Reading data already waits for the readback it needs.
 
 :::note[WebGPU mapping]
-`v.wait()` calls `device.queue.onSubmittedWorkDone()` after submitting the compiled graph.
+`v.wait()` calls `device.queue.onSubmittedWorkDone()` after submitting work.
 :::

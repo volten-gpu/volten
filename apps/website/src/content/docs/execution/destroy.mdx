@@ -1,9 +1,9 @@
 ---
 title: v.destroy()
-description: Release Volten-owned resources for a node graph.
+description: Release Volten-owned resources for nodes.
 ---
 
-Use `v.destroy()` when you are done with a node graph and want to release Volten-owned internal resources.
+Use `v.destroy()` when you are done with nodes and want to release Volten-owned internal resources.
 
 ```ts
 const node = v.pass(kernel, { data });
@@ -12,11 +12,11 @@ v.run(node);
 v.destroy(node);
 ```
 
-It walks the node and its dependencies.
+If the node depends on earlier work through handles, those dependencies are included too.
 
 ## What It Destroys
 
-`v.destroy()` destroys resources created by Volten for the node graph, such as hidden bounds-guard uniforms and debug buffers.
+`v.destroy()` destroys resources created by Volten for nodes, such as hidden bounds-guard uniforms and debug buffers.
 
 It does not destroy user-created resources:
 

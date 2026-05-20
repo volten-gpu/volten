@@ -1,0 +1,27 @@
+---
+title: Execution Overview
+description: Learn how Volten prepares, batches, and runs GPU work.
+---
+
+Execution in Volten starts by creating nodes.
+
+```ts
+const A = v.pass(K1, { data });
+const B = v.pass(K2, { otherData });
+```
+
+You can run one pass:
+
+```ts
+v.run(A);
+```
+
+Or batch multiple passes:
+
+```ts
+v.run([A, B]);
+```
+
+Batching lets Volten combine compatible GPU work where possible. It can reuse pipelines, avoid extra setup, and submit related compute passes together while still preserving the order required by shared resources.
+
+Later, when one pass needs data produced by another pass, handles let you connect them explicitly.

@@ -54,10 +54,11 @@ export default defineConfig({
                 {
                     label: 'Execution',
                     items: [
+                        { slug: 'execution/overview', label: 'Overview' },
                         { slug: 'execution/pass' },
-                        { slug: 'execution/nodes-and-handles' },
                         { slug: 'execution/run' },
                         { slug: 'execution/wait' },
+                        { slug: 'execution/nodes-and-handles' },
                         { slug: 'execution/read' },
                         { slug: 'execution/destroy' }
                     ]
