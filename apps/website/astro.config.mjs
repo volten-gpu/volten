@@ -7,8 +7,9 @@ export default defineConfig({
         starlight({
             title: 'Volten',
             description: 'WebGPU compute, without the ceremony.',
+            favicon: '/favicon.png',
             logo: {
-                src: './src/assets/logo.svg',
+                src: './src/assets/logo.png',
                 alt: 'Volten'
             },
             social: [
