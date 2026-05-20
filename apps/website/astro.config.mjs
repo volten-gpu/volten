@@ -71,6 +71,17 @@ export default defineConfig({
                         { slug: 'debugging/shader-logs' },
                         { slug: 'debugging/read-debug' }
                     ]
+                },
+                {
+                    label: 'Examples',
+                    items: [
+                        { slug: 'examples', label: 'Overview' },
+                        { slug: 'examples/scale-values' },
+                        { slug: 'examples/map-input-to-output' },
+                        { slug: 'examples/uniform-parameters' },
+                        { slug: 'examples/run-two-nodes' },
+                        { slug: 'examples/debug-one-invocation' }
+                    ]
                 }
             ]
         })

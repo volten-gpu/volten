@@ -1,0 +1,31 @@
+---
+title: Uniform Parameters
+description: Pass a runtime value into a kernel.
+---
+
+Use a `Uniform` for small values that affect every invocation.
+
+```ts
+import { volten, Buffer, Kernel, Uniform } from '@volten/core';
+
+const v = await volten();
+
+const data = new Buffer([1, 2, 3, 4], 'f32', 'rw');
+const multiplier = new Uniform(10, 'f32');
+
+const scale = new Kernel(`
+  fn main(gid: vec3u) {
+    data[gid.x] = data[gid.x] * multiplier;
+  }
+`);
+
+const node = v.pass(scale, { data, multiplier });
+v.run(node);
+
+console.log(await v.read(data));
+// Float32Array [10, 20, 30, 40]
+```
+
+Uniforms are a good fit for scalars, vectors, and small parameter structs.
+
+Learn more: [Uniforms](/data/uniforms/), [Bindings](/kernels/bindings/).

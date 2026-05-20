@@ -1,0 +1,29 @@
+---
+title: Map Input to Output
+description: Read from one buffer and write into another.
+---
+
+Use separate buffers when you want to keep the input unchanged.
+
+```ts
+import { volten, Buffer, Kernel } from '@volten/core';
+
+const v = await volten();
+
+const input = new Buffer([1, 2, 3, 4], 'f32', 'r');
+const output = new Buffer([0, 0, 0, 0], 'f32', 'rw');
+
+const doubleValues = new Kernel(`
+  fn main(gid: vec3u) {
+    output[gid.x] = input[gid.x] * 2.0;
+  }
+`);
+
+const node = v.pass(doubleValues, { input, output });
+v.run(node);
+
+console.log(await v.read(output));
+// Float32Array [2, 4, 6, 8]
+```
+
+Learn more: [Reading Data](/data/reading-data/), [v.read()](/execution/read/).

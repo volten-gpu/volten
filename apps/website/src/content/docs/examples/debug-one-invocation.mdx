@@ -1,0 +1,42 @@
+---
+title: Debug One Invocation
+description: Print one shader value from one GPU invocation.
+---
+
+Enable debugging on the node, then call `enableDebug()` for the invocation you want to inspect.
+
+```ts
+import { volten, Buffer, Kernel, Uniform } from '@volten/core';
+
+const v = await volten();
+
+const inout = new Buffer([1, 2, 3, 4], 'f32', 'rw');
+const mult = new Uniform(10, 'f32');
+
+const kernel = new Kernel(`
+  fn main(gid: vec3u) {
+    inout[gid.x] = inout[gid.x] * mult;
+
+    if (gid.x == 2u) {
+      enableDebug();
+    }
+
+    // Only gid.x == 2u emits this log.
+    debugF32("value", inout[gid.x]);
+  }
+`);
+
+const node = v.pass(kernel, { inout, mult }, { debug: true });
+v.run(node);
+
+const debug = await v.readDebug(node);
+debug.print();
+```
+
+Console output:
+
+```txt
+[2,0,0] value: 30
+```
+
+Learn more: [Debugging Overview](/debugging/overview/), [Shader Logs](/debugging/shader-logs/), [v.readDebug()](/debugging/read-debug/).
