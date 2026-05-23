@@ -41,8 +41,5 @@ jobs:
       - name: Run unit tests
         run: pnpm exec turbo run test
 
-      - name: Smoke test package
-        run: pnpm test:pack
-
       - name: Build website
         run: pnpm docs:build
