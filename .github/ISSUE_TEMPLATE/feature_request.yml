@@ -1,0 +1,54 @@
+name: Feature or API proposal
+description: Suggest an improvement to Volten's API
+title: '[Feature]: '
+labels:
+    - enhancement
+body:
+    - type: markdown
+      attributes:
+          value: |
+              Thanks for proposing an improvement. Concrete examples are especially helpful for API design.
+
+    - type: textarea
+      id: problem
+      attributes:
+          label: Problem
+          description: What are you trying to do?
+      validations:
+          required: true
+
+    - type: textarea
+      id: proposal
+      attributes:
+          label: Proposal
+          description: What API, behavior, or capability would you like Volten to add or change?
+      validations:
+          required: true
+
+    - type: textarea
+      id: example
+      attributes:
+          label: Example usage
+          description: Show what using the proposed feature might look like.
+          placeholder: |
+              ```ts
+              // Proposed usage
+              ```
+      validations:
+          required: false
+
+    - type: textarea
+      id: alternatives
+      attributes:
+          label: Alternatives considered
+          description: Have you found a workaround or considered a different API shape?
+      validations:
+          required: false
+
+    - type: textarea
+      id: context
+      attributes:
+          label: Additional context
+          description: Links, screenshots, prior art, or related WebGPU/WGSL details.
+      validations:
+          required: false
