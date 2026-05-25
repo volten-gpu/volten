@@ -19,7 +19,7 @@
     "@playwright/test": "^1.60.0",
     "prettier": "^3.8.3",
     "turbo": "^2.9.14",
-    "typescript": "5.9.2",
+    "typescript": "6.0.3",
     "vitest": "^4.1.7"
   },
   "packageManager": "pnpm@9.0.0",
