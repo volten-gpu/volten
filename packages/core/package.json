@@ -53,13 +53,13 @@
     "check-types:file": "tsc --noEmit --pretty false > tsc_output.txt 2>&1 || type tsc_output.txt"
   },
   "dependencies": {
-    "@webgpu/types": "^0.1.70"
+    "@webgpu/types": "^0.1.71"
   },
   "devDependencies": {
     "@repo/eslint-config": "workspace:*",
     "@repo/typescript-config": "workspace:*",
     "@types/node": "^22.15.3",
-    "eslint": "^9.39.1",
-    "typescript": "5.9.2"
+    "eslint": "^9.39.4",
+    "typescript": "5.9.3"
   }
 }
