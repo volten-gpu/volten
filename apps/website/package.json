@@ -10,11 +10,11 @@
     "check-types": "astro check"
   },
   "dependencies": {
-    "@astrojs/starlight": "0.39.2",
+    "@astrojs/starlight": "0.41.5",
     "astro": "6.4.2"
   },
   "devDependencies": {
-    "@astrojs/check": "0.9.9",
+    "@astrojs/check": "0.9.10",
     "typescript": "5.9.2"
   }
 }
