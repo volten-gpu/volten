@@ -20,80 +20,30 @@ export interface VoltenOptions {
     uniformLayoutMode?: 'auto' | 'classic' | 'standard';
 }
 
-/**
- * Pass-level options that override kernel defaults.
- */
-export interface PassOptions {
-    /**
-     * Override thread dispatch count for this specific pass.
-     * - number: Total 1D thread count
-     * - [number]: Total 1D invocations
-     * - [number, number]: Total 2D invocations (z defaults to 1)
-     * - [number, number, number]: Total 3D invocations
-     */
-    threads?: number | [number] | [number, number] | [number, number, number];
-    /** Optional human-friendly label for the created node/pass. */
-    label?: string;
-    /** Optional shader debugging support for this specific pass. */
-    debug?: boolean | import('./debug/types.js').DebugOptions;
-}
-
-import { Kernel } from './kernel/kernel.js';
 import { PipelineCache } from './graph/pipeline-cache.js';
-import {
-    generateBindings,
-    assembleFullShader,
-    resolveBounds,
-    resolveDispatch
-} from './kernel/bindings.js';
 import { getOrCreateNodeBindGroup } from './kernel/bind-groups.js';
 import { resolveConcreteBuffer } from './kernel/resource-resolution.js';
-import { prepareKernelShader } from './kernel/shader.js';
-import { VOLTEN_BOUNDS_NAME } from './kernel/builtins.js';
-import {
-    createNode,
-    getNodeOutputHandles,
-    type Node,
-    type Handle,
-    isHandle
-} from './graph/node.js';
+import { type Node, type Handle, isHandle, isNode } from './graph/node.js';
+import type { DispatchHandle, DispatchNode } from './graph/dispatch-node.js';
+import { Materializer } from './graph/materializer.js';
 import { compile, type ExecutionPlan } from './graph/compiler.js';
 import { collectNodesFromMultiple } from './graph/scheduler.js';
 import { Buffer } from './data/buffer.js';
 import { RawBuffer } from './data/raw-buffer.js';
-import { Uniform } from './data/uniform.js';
 import { getTypedArrayForType } from './utils/alignment.js';
 import {
     resolveUniformLayoutMode,
     type UniformLayoutMode,
     type UniformLayoutPreference
 } from './utils/uniform-layout.js';
-import { makeNodeLabel } from './utils/labels.js';
-import {
-    DebugBufferResource,
-    VOLTEN_DEBUG_BUFFER_NAME,
-    decodeDebugBuffer,
-    createDebugTransform,
-    resolveDebugOptions,
-    type DebugReadResult
-} from './debug/index.js';
+import { decodeDebugBuffer, type DebugReadResult } from './debug/index.js';
+
+export type { InvocationOptions } from './graph/node.js';
 
 /**
  * Valid targets for reading back data to the CPU.
  */
 export type ReadTarget = Node | Buffer | RawBuffer | Handle;
-
-function dispatchNeedsBoundsGuard(
-    bounds: [number, number, number],
-    dispatch: [number, number, number],
-    workgroupSize: [number, number, number]
-): boolean {
-    return (
-        dispatch[0] * workgroupSize[0] !== bounds[0] ||
-        dispatch[1] * workgroupSize[1] !== bounds[1] ||
-        dispatch[2] * workgroupSize[2] !== bounds[2]
-    );
-}
 
 /**
  * The main Volten context - the "v" instance
@@ -109,6 +59,7 @@ export class VoltenContext {
     readonly _pipelineCache: PipelineCache;
     /** Resolved uniform layout mode for this context */
     readonly _uniformLayoutMode: UniformLayoutMode;
+    private readonly _materializer: Materializer;
 
     constructor(
         device: GPUDevice,
@@ -123,177 +74,10 @@ export class VoltenContext {
         this._uniformLayoutMode = resolveUniformLayoutMode(
             options?.uniformLayoutMode
         );
-    }
-
-    /**
-     * Create a compute pass node.
-     *
-     * This is the central API for building compute DAGs. It:
-     * 1. Validates and classifies bindings (Buffer, RawBuffer, Uniform, Handle)
-     * 2. Resolves logical invocation bounds and workgroup dispatch
-     * 3. Generates WGSL binding declarations
-     * 4. Assembles the full shader (bindings + kernel source)
-     * 5. Creates or reuses a cached compute pipeline
-     * 6. Returns a Node with output Handles for DAG chaining
-     *
-     * @param kernel - The kernel to execute
-     * @param bindings - Input/output bindings (Buffer, RawBuffer, Uniform, or Handle from previous pass)
-     * @param options - Optional pass configuration (e.g., thread override)
-     * @returns A Node handle for chaining or execution
-     *
-     * @example
-     * ```ts
-     * const input = new Buffer([1, 2, 3, 4], "f32");
-     * const output = new Buffer([0, 0, 0, 0], "f32", "rw");
-     *
-     * const A = v.pass(new Kernel(`
-     *   fn main(gid: vec3u) {
-     *     output[gid.x] = input[gid.x] * 2.0;
-     *   }
-     * `, { threads: 'input' }), { input, output });
-     *
-     * // Chain passes:
-     * const B = v.pass(AnotherKernel, { data: A.output, result: resultBuf });
-     * ```
-     */
-    pass(
-        kernel: Kernel,
-        bindings: Record<string, Buffer | RawBuffer | Uniform | Handle> = {},
-        options?: PassOptions
-    ): Node {
-        const nodeLabel = makeNodeLabel(kernel.label, options?.label);
-
-        // 1. Validate kernel type
-        if (!(kernel instanceof Kernel)) {
-            throw new Error(
-                'Volten Error: First argument to v.pass() must be a Kernel instance.\n' +
-                    '  Example: v.pass(new Kernel(`fn main(gid: vec3u) { ... }`), { ... })'
-            );
-        }
-
-        if (VOLTEN_BOUNDS_NAME in bindings) {
-            throw new Error(
-                `Volten Error: Binding name "${VOLTEN_BOUNDS_NAME}" is reserved for internal use.`
-            );
-        }
-
-        if (VOLTEN_DEBUG_BUFFER_NAME in bindings) {
-            throw new Error(
-                `Volten Error: Binding name "${VOLTEN_DEBUG_BUFFER_NAME}" is reserved for internal use.`
-            );
-        }
-
-        // 2. Resolve logical bounds and physical dispatch dimensions
-        const bounds = resolveBounds(kernel, bindings, options?.threads);
-        const dispatch = resolveDispatch(kernel, bindings, options?.threads);
-        const debugOptions = resolveDebugOptions(options?.debug);
-
-        if (
-            !kernel.unsafeManualBounds &&
-            kernel.usesBarrier &&
-            dispatchNeedsBoundsGuard(bounds, dispatch, kernel.workgroupSize)
-        ) {
-            throw new Error(
-                'Volten Error: This kernel uses workgroup/storage barriers and also requires a guarded partial workgroup.\n' +
-                    '  An injected early-return wrapper would be unsafe here.\n' +
-                    '  Fix one of these:\n' +
-                    '  1. Make threads an exact multiple of workgroupSize\n' +
-                    '  2. Set unsafeManualBounds: true and handle bounds manually in WGSL'
-            );
-        }
-
-        const ownedResources = [];
-        const executionBindings = {
-            ...bindings
-        };
-
-        if (!kernel.unsafeManualBounds) {
-            const boundsUniform = new Uniform(
-                [bounds[0], bounds[1], bounds[2], 0],
-                'vec4u',
-                {
-                    label: `${nodeLabel} bounds`
-                }
-            );
-            ownedResources.push(boundsUniform);
-            executionBindings[VOLTEN_BOUNDS_NAME] = boundsUniform;
-        }
-
-        let debugState: {
-            readonly resource: DebugBufferResource;
-            readonly messages: readonly string[];
-        } | null = null;
-        let debugResource: DebugBufferResource | null = null;
-        let debugTransform: ReturnType<typeof createDebugTransform> | null =
-            null;
-
-        if (debugOptions) {
-            debugTransform = createDebugTransform(debugOptions.capacityWords);
-            debugResource = new DebugBufferResource(
-                debugOptions,
-                `${nodeLabel} debug`
-            );
-            ownedResources.push(debugResource);
-            executionBindings[VOLTEN_DEBUG_BUFFER_NAME] = debugResource.buffer;
-        }
-
-        // 3. Generate binding entries (classify & validate)
-        const bindingEntries = generateBindings(executionBindings, {
+        this._materializer = new Materializer({
+            device,
+            pipelineCache: this._pipelineCache,
             uniformLayoutMode: this._uniformLayoutMode
-        });
-
-        // 4. Prepare and assemble full shader source
-        const preparedShader = prepareKernelShader(kernel, {
-            transforms: debugTransform ? [debugTransform] : []
-        });
-
-        // the reason why this if-statement sits here is
-        // that `prepareKernelShader` will run the debug-transform
-        // and only afterwards the "messages" property will be populated
-        if (debugResource && debugTransform) {
-            debugState = {
-                resource: debugResource,
-                messages: debugTransform.messages
-            };
-        }
-
-        const shaderCode = assembleFullShader(bindingEntries, {
-            uniformLayoutMode: this._uniformLayoutMode,
-            kernelSource: preparedShader.kernelSource,
-            additionalSections: preparedShader.supportWgsl
-        });
-
-        // 5. Get or create pipeline
-        const { pipeline, bindGroupLayout } = this._pipelineCache.getOrCreate(
-            this.device,
-            shaderCode,
-            kernel.label
-        );
-
-        // 6. Collect dependencies (nodes that provide Handle inputs)
-        const dependencies: Node[] = [];
-        const seen = new Set<symbol>();
-        for (const value of Object.values(bindings)) {
-            if (isHandle(value) && !seen.has(value._node._id)) {
-                seen.add(value._node._id);
-                dependencies.push(value._node);
-            }
-        }
-
-        // 7. Create and return the Node
-        return createNode({
-            kernel,
-            pipeline,
-            bindGroupLayout,
-            bindingEntries,
-            ownedResources,
-            bounds: [...bounds],
-            dispatch: [...dispatch],
-            bindings,
-            shaderCode,
-            dependencies,
-            label: nodeLabel,
-            debug: debugState
         });
     }
 
@@ -302,21 +86,17 @@ export class VoltenContext {
     // -----------------------------------------------------------------------
 
     /**
-     * Compile one or more terminal nodes into an ExecutionPlan.
+     * Materialize logical nodes, then put their dispatches in a safe order.
      *
-     * This is a pure graph analysis step — no GPU calls. It:
-     * - Merges multiple terminal subtrees
-     * - Detects shared concrete buffers between independent subtrees
-     * - Injects synthetic dependencies for buffer-overlapping nodes
-     * - Produces a topologically sorted execution order
-     *
-     * This is where future auto-allocation planning can slot in.
-     *
-     * @param terminals - Terminal nodes in the order specified by v.run()
-     * @returns An ExecutionPlan with nodes in safe execution order
+     * Materialization may select a context-specific shader and create its
+     * pipeline. The compiler then handles shared buffers and sorts the
+     * physical dispatch graph.
      */
-    private _compile(terminals: Node[]): ExecutionPlan {
-        return compile(terminals);
+    private _compile(nodes: readonly Node[]): ExecutionPlan | null {
+        const invocations = this._materializer
+            .materialize(nodes)
+            .filter((invocation) => invocation.terminals.length > 0);
+        return invocations.length > 0 ? compile(invocations) : null;
     }
 
     /**
@@ -346,7 +126,7 @@ export class VoltenContext {
         // Track nodes that have been executed within the *current* pass.
         // If a subsequent node depends on any of these, we must end the pass
         // to ensure memory visibility rules (Read-After-Write hazard).
-        const nodesInCurrentPass = new Set<Node>();
+        const nodesInCurrentPass = new Set<DispatchNode>();
 
         for (const node of plan.sorted) {
             if (node._debug) {
@@ -414,9 +194,9 @@ export class VoltenContext {
      * @param node - Terminal node(s) to execute
      */
     run(node: Node | Node[]): void {
-        const terminals = Array.isArray(node) ? node : [node];
-        const plan = this._compile(terminals);
-        this._submit(plan);
+        const nodes = Array.isArray(node) ? node : [node];
+        const execution = this._compile(nodes);
+        if (execution) this._submit(execution);
     }
 
     /**
@@ -425,9 +205,9 @@ export class VoltenContext {
      * @param node - Terminal node(s) to execute
      */
     async wait(node: Node | Node[]): Promise<void> {
-        const terminals = Array.isArray(node) ? node : [node];
-        const plan = this._compile(terminals);
-        this._submit(plan);
+        const nodes = Array.isArray(node) ? node : [node];
+        const execution = this._compile(nodes);
+        if (execution) this._submit(execution);
         await this.device.queue.onSubmittedWorkDone();
     }
 
@@ -443,7 +223,10 @@ export class VoltenContext {
      * @param node - Terminal node(s) whose internal subtree resources should be released
      */
     destroy(node: Node | Node[]): void {
-        const terminals = Array.isArray(node) ? node : [node];
+        const nodes = Array.isArray(node) ? node : [node];
+        const terminals = nodes.flatMap((current) => [
+            ...(this._materializer.getCached(current)?.terminals ?? [])
+        ]);
         const reachable = collectNodesFromMultiple(terminals);
 
         for (const current of reachable) {
@@ -553,7 +336,6 @@ export class VoltenContext {
         type TargetPlan =
             | {
                   type: 'node';
-                  node: Node;
                   outputs: { name: string; concrete: Buffer | RawBuffer }[];
               }
             | { type: 'buffer'; concrete: Buffer | RawBuffer };
@@ -562,21 +344,19 @@ export class VoltenContext {
 
         for (const t of targets) {
             if (t instanceof Buffer || t instanceof RawBuffer || isHandle(t)) {
-                const concrete = resolveReadBuffer(t);
+                const concrete = this._resolveReadBuffer(t);
                 uniqueBuffers.set(concrete, {
                     staging: null!,
                     size: concrete.byteLength
                 });
                 targetPlans.push({ type: 'buffer', concrete });
-            } else {
-                // It's a Node
-                const nodeOutputs = getNodeOutputHandles(t as Node);
-                const outputNames = Object.keys(nodeOutputs);
+            } else if (isNode(t)) {
+                const lowered = this._materializer.lowerNode(t);
+                const outputNames = lowered.outputNames;
                 if (outputNames.length === 0) {
                     throw new Error(
                         'Volten Error: v.read() called on a node with no declared outputs.\n' +
-                            '  Hint: Make sure your Kernel has outputs declared, e.g.:\n' +
-                            "    new Kernel(`...`, { outputs: ['result'] })"
+                            '  A kernel declares readable outputs with kernel({ outputs: [...] }); a plan returns them from its builder.'
                     );
                 }
                 const outputs: {
@@ -584,15 +364,22 @@ export class VoltenContext {
                     concrete: Buffer | RawBuffer;
                 }[] = [];
                 for (const name of outputNames) {
-                    const handle = nodeOutputs[name];
-                    const concrete = resolveReadBuffer(handle);
+                    const resolved = lowered.outputs.get(name);
+                    if (!resolved) {
+                        throw new Error(
+                            `Volten Error: Operation "${t._label}" declares output "${name}" but does not expose a matching buffer handle.`
+                        );
+                    }
+                    const concrete = this._resolveReadBuffer(resolved.resource);
                     uniqueBuffers.set(concrete, {
                         staging: null!,
                         size: concrete.byteLength
                     });
                     outputs.push({ name, concrete });
                 }
-                targetPlans.push({ type: 'node', node: t as Node, outputs });
+                targetPlans.push({ type: 'node', outputs });
+            } else {
+                throw new Error('Volten Error: Invalid v.read() target.');
             }
         }
 
@@ -621,17 +408,25 @@ export class VoltenContext {
     }
 
     async readDebug(node: Node): Promise<DebugReadResult> {
-        if (!node._debug) {
+        if (node._operation._kind === 'plan') {
+            throw new Error(
+                'Volten Error: v.readDebug() does not support plan nodes yet.'
+            );
+        }
+
+        const lowered = this._materializer.lowerNode(node);
+        const dispatch = lowered.terminals[0];
+        if (!dispatch?._debug) {
             throw new Error(
                 'Volten Error: v.readDebug() called on a node without debug support.\n' +
-                    '  Hint: Create the node with v.pass(kernel, bindings, { debug: true }).'
+                    '  Hint: Enable it when invoking the kernel: operation(bindings, { debug: true }).'
             );
         }
 
         const readback = await this._readConcreteBuffers([
-            node._debug.resource.buffer
+            dispatch._debug.resource.buffer
         ]);
-        const raw = readback.get(node._debug.resource.buffer);
+        const raw = readback.get(dispatch._debug.resource.buffer);
         if (!(raw instanceof ArrayBuffer)) {
             throw new Error(
                 'Volten Error: Internal debug readback expected an ArrayBuffer payload.'
@@ -640,20 +435,21 @@ export class VoltenContext {
 
         return decodeDebugBuffer(
             raw,
-            node._debug.messages,
-            node._debug.resource.bufferSize
+            dispatch._debug.messages,
+            dispatch._debug.resource.bufferSize
         );
     }
-}
 
-function resolveReadBuffer(
-    value: Buffer | RawBuffer | Handle
-): Buffer | RawBuffer {
-    const concrete = resolveConcreteBuffer(value);
-    if (concrete) {
-        return concrete;
+    private _resolveReadBuffer(
+        value: Buffer | RawBuffer | Handle | DispatchHandle
+    ): Buffer | RawBuffer {
+        const physical = isHandle(value)
+            ? this._materializer.resolveHandle(value).resource
+            : value;
+        const concrete = resolveConcreteBuffer(physical);
+        if (concrete) return concrete;
+        throw new Error(
+            'Volten Error: Cannot resolve a concrete buffer from the read target.'
+        );
     }
-    throw new Error(
-        `Volten Error: Cannot resolve concrete buffer from read target of type ${typeof value}.`
-    );
 }

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Kernel } from '../src/kernel/kernel.js';
+import { Kernel, kernel } from '../src/kernel/kernel.js';
 import { prepareKernelShader } from '../src/kernel/shader.js';
 import { VoltenContext } from '../src/context.js';
 import {
@@ -46,6 +46,26 @@ function createMockPassContext(): VoltenContext {
     } as any;
 
     return new VoltenContext(mockDevice);
+}
+
+function invoke(
+    definition: Kernel,
+    bindings: Record<string, any> = {},
+    options?: any
+) {
+    const operation = kernel({
+        shader: definition.source,
+        label: definition.label,
+        outputs: definition.outputNames,
+        workgroupSize: definition.workgroupSize,
+        threads: definition.threads,
+        unsafeManualBounds: definition.unsafeManualBounds
+    });
+    return operation(bindings, options);
+}
+
+function getDispatch(v: VoltenContext, node: any): any {
+    return (v as any)._materializer.lowerNode(node).terminals[0];
 }
 
 describe('Debug Shader Preparation', () => {
@@ -202,16 +222,17 @@ fn main() {
             { threads: 1 }
         );
 
-        const node = v.pass(kernel, {}, { debug: true });
+        const node = invoke(kernel, {}, { debug: true });
+        const dispatch = getDispatch(v, node);
 
         expect(
-            node._bindingEntries.find(
+            dispatch._bindingEntries.find(
                 (entry) => entry.name === VOLTEN_DEBUG_BUFFER_NAME
             )
         ).toBeDefined();
-        expect(node._debug).not.toBeNull();
+        expect(dispatch._debug).not.toBeNull();
         expect((node as any)[VOLTEN_DEBUG_BUFFER_NAME]).toBeUndefined();
-        expect(node._shaderCode).toContain(
+        expect(dispatch._shaderCode).toContain(
             `var<storage, read_write> ${VOLTEN_DEBUG_BUFFER_NAME}: ${VOLTEN_DEBUG_BUFFER_STRUCT_NAME};`
         );
     });
@@ -228,7 +249,7 @@ fn main() {
             { threads: 1 }
         );
 
-        const node = v.pass(kernel, {}, { debug: true });
+        const node = invoke(kernel, {}, { debug: true });
         v.run(node);
 
         expect(mockWriteBuffer).toHaveBeenCalledTimes(1);
@@ -250,9 +271,10 @@ fn main() {
             { threads: 1 }
         );
 
-        const node = v.pass(kernel, {}, { debug: { bufferSize: 128 } });
+        const node = invoke(kernel, {}, { debug: { bufferSize: 128 } });
+        const dispatch = getDispatch(v, node);
 
-        const totalWords = node._debug!.resource.buffer.byteLength / 4;
+        const totalWords = dispatch._debug.resource.buffer.byteLength / 4;
         const words = new Uint32Array(totalWords);
 
         // cursor / dropped
@@ -311,9 +333,10 @@ fn main() {
             { threads: 1 }
         );
 
-        const node = v.pass(kernel, {}, { debug: { bufferSize: 64 } });
+        const node = invoke(kernel, {}, { debug: { bufferSize: 64 } });
+        const dispatch = getDispatch(v, node);
         const words = new Uint32Array(
-            node._debug!.resource.buffer.byteLength / 4
+            dispatch._debug.resource.buffer.byteLength / 4
         );
         const consoleLog = vi
             .spyOn(console, 'log')
@@ -345,7 +368,7 @@ fn main() {
     it('throws when readDebug() is called on a node without debug support', async () => {
         const v = new VoltenContext(mockDevice);
         const kernel = new Kernel('fn main() { }', { threads: 1 });
-        const node = v.pass(kernel, {});
+        const node = invoke(kernel);
 
         await expect(v.readDebug(node)).rejects.toThrow(
             /without debug support/

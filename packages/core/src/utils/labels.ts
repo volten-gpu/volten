@@ -19,13 +19,13 @@ export function makeLabel(kind: string, explicit?: string): string {
     return `${kind}#${nextLabelIndex(kind)}`;
 }
 
-export function makeNodeLabel(
-    kernelLabel: string,
+export function makeInvocationLabel(
+    operationLabel: string,
     explicit?: string
 ): string {
     const normalized = normalizeExplicitLabel(explicit);
     if (normalized) {
         return normalized;
     }
-    return `${kernelLabel}::pass#${nextLabelIndex('Pass')}`;
+    return `${operationLabel}::node#${nextLabelIndex('Node')}`;
 }

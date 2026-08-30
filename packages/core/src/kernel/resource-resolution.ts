@@ -1,7 +1,10 @@
 import { Buffer } from '../data/buffer.js';
 import { RawBuffer } from '../data/raw-buffer.js';
 import { Uniform } from '../data/uniform.js';
-import { type Handle, isHandle } from '../graph/node.js';
+import {
+    type DispatchHandle,
+    isDispatchHandle
+} from '../graph/dispatch-node.js';
 
 export type BindableResource = Buffer | RawBuffer | Uniform;
 
@@ -17,7 +20,7 @@ export function resolveConcreteBuffer(
     if (value instanceof Buffer || value instanceof RawBuffer) {
         return value;
     }
-    if (isHandle(value)) {
+    if (isDispatchHandle(value)) {
         const parentBinding = value._node._bindings[value._name];
         return resolveConcreteBuffer(parentBinding);
     }
@@ -25,7 +28,7 @@ export function resolveConcreteBuffer(
 }
 
 export function resolveBindableResource(
-    value: Buffer | RawBuffer | Uniform | Handle
+    value: Buffer | RawBuffer | Uniform | DispatchHandle
 ): BindableResource {
     if (
         value instanceof Buffer ||
@@ -37,6 +40,6 @@ export function resolveBindableResource(
 
     const sourceBinding = value._node._bindings[value._name];
     return resolveBindableResource(
-        sourceBinding as Buffer | RawBuffer | Uniform | Handle
+        sourceBinding as Buffer | RawBuffer | Uniform | DispatchHandle
     );
 }

@@ -3,27 +3,25 @@ title: Outputs
 description: Declare which kernel bindings should be treated as outputs.
 ---
 
-Kernel outputs tell Volten which bindings should be returned when you read a node.
+Kernel outputs tell Volten which bindings should be returned when you read a
+primitive kernel node.
 
 ```ts
-const kernel = new Kernel(
-    `
+const doubleValues = kernel({
+    shader: `
       fn main(gid: vec3u) {
         result[gid.x] = input[gid.x] * 2.0;
       }
     `,
-    {
-        outputs: ['result']
-    }
-);
+    outputs: ['result']
+});
 ```
 
 Then read the node:
 
 ```ts
-const node = v.pass(kernel, { input, result });
+const node = doubleValues({ input, result });
 v.run(node);
-
 const output = await v.read(node);
 // { result: Float32Array [...] }
 ```
@@ -33,15 +31,16 @@ const output = await v.read(node);
 The simplest form is an array of binding names.
 
 ```ts
-const kernel = new Kernel(`...`, {
+const computeResults = kernel({
+    shader: `...`,
     outputs: ['result', 'debug']
 });
 ```
 
-Those names must match buffer-like bindings passed to `v.pass()`.
+Those names must match buffer-like bindings passed to the callable kernel.
 
 ```ts
-const node = v.pass(kernel, {
+const node = computeResults({
     input,
     result,
     debug
@@ -53,13 +52,15 @@ const node = v.pass(kernel, {
 You do not need declared outputs for in-place work.
 
 ```ts
-const kernel = new Kernel(`
+const doubleInPlace = kernel({
+    shader: `
   fn main(gid: vec3u) {
     data[gid.x] = data[gid.x] * 2.0;
   }
-`);
+`
+});
 
-const node = v.pass(kernel, { data });
+const node = doubleInPlace({ data });
 v.run(node);
 
 const result = await v.read(data);

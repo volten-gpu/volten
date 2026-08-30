@@ -56,10 +56,10 @@ export default defineConfig({
                     label: 'Execution',
                     items: [
                         { slug: 'execution/overview', label: 'Overview' },
-                        { slug: 'execution/pass' },
                         { slug: 'execution/run' },
                         { slug: 'execution/wait' },
                         { slug: 'execution/nodes-and-handles' },
+                        { slug: 'execution/invoking-operations' },
                         { slug: 'execution/read' },
                         { slug: 'execution/destroy' }
                     ]
@@ -80,7 +80,9 @@ export default defineConfig({
                         { slug: 'examples/map-input-to-output' },
                         { slug: 'examples/uniform-parameters' },
                         { slug: 'examples/run-two-nodes' },
-                        { slug: 'examples/debug-one-invocation' }
+                        { slug: 'examples/connect-work-with-handles' },
+                        { slug: 'examples/debug-one-invocation' },
+                        { slug: 'examples/plans' }
                     ]
                 }
             ]

@@ -2,9 +2,14 @@ import { describe, it, expect } from 'vitest';
 import {
     compile,
     resolveConcreteBuffer,
-    type ExecutionPlan
+    type ExecutionPlan,
+    type MaterializedInvocation
 } from '../src/graph/compiler.js';
-import { createNode, type Node, type Handle } from '../src/graph/node.js';
+import {
+    createDispatchNode as createNode,
+    type DispatchNode as Node,
+    type DispatchHandle as Handle
+} from '../src/graph/dispatch-node.js';
 import { Buffer } from '../src/data/buffer.js';
 import { RawBuffer } from '../src/data/raw-buffer.js';
 
@@ -45,6 +50,10 @@ function assertBefore(plan: ExecutionPlan, nodeA: Node, nodeB: Node): void {
     expect(idxA).toBeGreaterThanOrEqual(0);
     expect(idxB).toBeGreaterThanOrEqual(0);
     expect(idxA).toBeLessThan(idxB);
+}
+
+function invocation(...terminals: Node[]): MaterializedInvocation {
+    return { terminals };
 }
 
 // ============================================================================
@@ -107,7 +116,7 @@ describe('compile — single terminal', () => {
         const B = makeNode('B', { input: A.data }, [A]);
         const C = makeNode('C', { input: B.input }, [B]);
 
-        const plan = compile([C]);
+        const plan = compile([invocation(C)]);
 
         expect(plan.sorted).toHaveLength(3);
         assertBefore(plan, A, B);
@@ -115,7 +124,7 @@ describe('compile — single terminal', () => {
     });
 
     it('throws on empty terminals', () => {
-        expect(() => compile([])).toThrow(/no terminal nodes/);
+        expect(() => compile([])).toThrow(/no materialized invocations/);
     });
 });
 
@@ -124,6 +133,20 @@ describe('compile — single terminal', () => {
 // ============================================================================
 
 describe('compile — independent terminals', () => {
+    it('accepts several independent terminals from one invocation', () => {
+        const buf1 = new Buffer([1], 'f32');
+        const buf2 = new Buffer([2], 'f32');
+
+        const A = makeNode('A', { data: buf1 });
+        const B = makeNode('B', { data: buf2 });
+
+        const plan = compile([invocation(A, B)]);
+
+        expect(plan.sorted).toHaveLength(2);
+        expect(plan.sorted).toContain(A);
+        expect(plan.sorted).toContain(B);
+    });
+
     it('merges two independent trees without synthetic deps', () => {
         const buf1 = new Buffer([1], 'f32');
         const buf2 = new Buffer([2], 'f32');
@@ -131,7 +154,7 @@ describe('compile — independent terminals', () => {
         const A = makeNode('A', { data: buf1 });
         const B = makeNode('B', { data: buf2 });
 
-        const plan = compile([A, B]);
+        const plan = compile([invocation(A), invocation(B)]);
 
         // Both nodes present, either order is valid
         expect(plan.sorted).toHaveLength(2);
@@ -151,7 +174,7 @@ describe('compile — independent terminals', () => {
         const C = makeNode('C', { data: buf3 });
         const D = makeNode('D', { input: C.data, out: buf4 }, [C]);
 
-        const plan = compile([B, D]);
+        const plan = compile([invocation(B), invocation(D)]);
 
         expect(plan.sorted).toHaveLength(4);
         assertBefore(plan, A, B);
@@ -166,10 +189,10 @@ describe('compile — independent terminals', () => {
 describe('compile — synthetic dependency injection', () => {
     it('injects synthetic dep when independent terminals share a buffer', () => {
         // The core scenario:
-        //   E = v.pass(k2, { inout });
-        //   K = v.pass(k6, { in: inout });
-        //   L = v.pass(k6, { in: K.in });
-        //   v.run(E, L);
+        //   E = k2({ inout });
+        //   K = k6({ input: inout });
+        //   L = k6({ input: K.input });
+        //   v.run([E, L]);
         //
         // E and K both use the same concrete buffer (inout) but have
         // no Handle connection. E must come before K.
@@ -179,7 +202,7 @@ describe('compile — synthetic dependency injection', () => {
         const K = makeNode('K', { input: inout });
         const L = makeNode('L', { src: K.input }, [K]);
 
-        const plan = compile([E, L]);
+        const plan = compile([invocation(E), invocation(L)]);
 
         expect(plan.sorted).toHaveLength(3);
         // E must come before K (synthetic dep due to shared buffer)
@@ -195,11 +218,11 @@ describe('compile — synthetic dependency injection', () => {
         const B = makeNode('B', { buf: shared });
 
         // v.run(A, B) → A before B
-        const plan1 = compile([A, B]);
+        const plan1 = compile([invocation(A), invocation(B)]);
         assertBefore(plan1, A, B);
 
         // v.run(B, A) → B before A
-        const plan2 = compile([B, A]);
+        const plan2 = compile([invocation(B), invocation(A)]);
         assertBefore(plan2, B, A);
     });
 
@@ -211,7 +234,7 @@ describe('compile — synthetic dependency injection', () => {
         const F = makeNode('F', { data: shared });
         const G = makeNode('G', { data: shared });
 
-        const plan = compile([E, F, G]);
+        const plan = compile([invocation(E), invocation(F), invocation(G)]);
 
         expect(plan.sorted).toHaveLength(3);
         assertBefore(plan, E, F);
@@ -229,7 +252,7 @@ describe('compile — synthetic dependency injection', () => {
         const F = makeNode('F', { data: bufB });
         const G = makeNode('G', { data: bufA });
 
-        const plan = compile([E, F, G]);
+        const plan = compile([invocation(E), invocation(F), invocation(G)]);
 
         expect(plan.sorted).toHaveLength(3);
         // E must come before G (shared bufA)
@@ -261,7 +284,7 @@ describe('compile — overlapping subtrees', () => {
         const D = makeNode('D', { input: C.out, out: buf4 }, [C]);
         const G = makeNode('G', { input: C.out, out: buf5 }, [C]);
 
-        const plan = compile([D, G]);
+        const plan = compile([invocation(D), invocation(G)]);
 
         // All 5 nodes present (C deduplicated)
         expect(plan.sorted).toHaveLength(5);
@@ -287,7 +310,7 @@ describe('compile — overlapping subtrees', () => {
         const D = makeNode('D', { input: C.out }, [C]);
         const G = makeNode('G', { input: C.out }, [C]);
 
-        const plan = compile([D, G]);
+        const plan = compile([invocation(D), invocation(G)]);
 
         // Exactly 5 unique nodes (not 8 from two separate A→B→C chains)
         expect(plan.sorted).toHaveLength(5);
@@ -311,7 +334,7 @@ describe('compile — inverted argument order', () => {
         const B = makeNode('B', { input: A.data, out: buf2 }, [A]);
 
         // v.run(B, A) — A is already in B's subtree
-        const plan = compile([B, A]);
+        const plan = compile([invocation(B), invocation(A)]);
 
         // A still comes before B (Handle-based dep overrides positional order)
         assertBefore(plan, A, B);

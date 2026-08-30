@@ -6,20 +6,21 @@ description: Pass a runtime value into a kernel.
 Use a `Uniform` for small values that affect every invocation.
 
 ```ts
-import { volten, Buffer, Kernel, Uniform } from '@volten/core';
+import { volten, Buffer, kernel, Uniform } from '@volten/core';
 
 const v = await volten();
-
 const data = new Buffer([1, 2, 3, 4], 'f32', 'rw');
 const multiplier = new Uniform(10, 'f32');
 
-const scale = new Kernel(`
+const scale = kernel({
+    shader: `
   fn main(gid: vec3u) {
     data[gid.x] = data[gid.x] * multiplier;
   }
-`);
+`
+});
 
-const node = v.pass(scale, { data, multiplier });
+const node = scale({ data, multiplier });
 v.run(node);
 
 console.log(await v.read(data));

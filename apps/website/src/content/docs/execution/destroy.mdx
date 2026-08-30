@@ -6,9 +6,8 @@ description: Release Volten-owned resources for nodes.
 Use `v.destroy()` when you are done with nodes and want to release Volten-owned internal resources.
 
 ```ts
-const node = v.pass(kernel, { data });
+const node = updateData({ data });
 v.run(node);
-
 v.destroy(node);
 ```
 
@@ -26,7 +25,6 @@ It does not destroy user-created resources:
 
 ```ts
 v.destroy(node);
-
 // User buffers are still yours.
 data.set([1, 2, 3, 4]);
 ```

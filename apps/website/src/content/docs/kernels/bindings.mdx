@@ -6,7 +6,7 @@ description: Connect kernel variable names to Volten resources.
 Bindings are the resources a kernel can access.
 
 ```ts
-const node = v.pass(kernel, {
+const node = scale({
     input,
     output,
     multiplier
@@ -25,19 +25,18 @@ fn main(gid: vec3u) {
 
 Bindings can be:
 
-| Value       | Use                                        |
-| ----------- | ------------------------------------------ |
-| `Buffer`    | Packed storage-buffer data                 |
-| `RawBuffer` | User-packed storage-buffer data            |
-| `Uniform`   | Small configuration values                 |
-| `Handle`    | A buffer handle from a previous `v.pass()` |
+| Value       | Use                                         |
+| ----------- | ------------------------------------------- |
+| `Buffer`    | Packed storage-buffer data                  |
+| `RawBuffer` | User-packed storage-buffer data             |
+| `Uniform`   | Small configuration values                  |
+| `Handle`    | A buffer handle from another operation node |
 
 Plain numbers, strings, and objects are not bindings. Wrap scalar configuration values in `Uniform`.
 
 ```ts
 const multiplier = new Uniform(2, 'f32');
-
-const node = v.pass(kernel, { input, output, multiplier });
+const node = scale({ input, output, multiplier });
 ```
 
 ## Handles
@@ -45,8 +44,8 @@ const node = v.pass(kernel, { input, output, multiplier });
 Every buffer-like binding on a node gets a handle. You can pass that handle into another node.
 
 ```ts
-const A = v.pass(doubleKernel, { input, output: mid });
-const B = v.pass(offsetKernel, { input: A.output, output: result });
+const A = doubleKernel({ input, output: mid });
+const B = offsetKernel({ input: A.output, output: result });
 ```
 
 Volten records the dependency, so running `B` also runs `A` first.

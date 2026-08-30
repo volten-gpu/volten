@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { topologicalSort } from '../src/graph/scheduler.js';
-import type { Node } from '../src/graph/node.js';
+import type { DispatchNode as Node } from '../src/graph/dispatch-node.js';
 
 // Helper to create minimal nodes for testing
 function makeNode(idStr: string, dependencies: Node[] = []): Node {

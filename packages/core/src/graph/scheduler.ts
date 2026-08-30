@@ -4,16 +4,16 @@
 // When multiple nodes become free simultaneously, an optional priority
 // map is used as tiebreaker (lower priority number → earlier execution).
 
-import type { Node } from './node.js';
+import type { DispatchNode } from './dispatch-node.js';
 
 /**
  * Collect all reachable nodes by walking dependencies from a terminal node.
  * Uses iterative DFS to avoid stack overflows on deep graphs.
  */
-export function collectNodes(terminal: Node): Node[] {
+export function collectNodes(terminal: DispatchNode): DispatchNode[] {
     const visited = new Set<symbol>();
-    const nodes: Node[] = [];
-    const stack: Node[] = [terminal];
+    const nodes: DispatchNode[] = [];
+    const stack: DispatchNode[] = [terminal];
 
     while (stack.length > 0) {
         const node = stack.pop()!;
@@ -34,10 +34,12 @@ export function collectNodes(terminal: Node): Node[] {
 /**
  * Collect all reachable nodes from multiple roots, deduplicating.
  */
-export function collectNodesFromMultiple(roots: Node[]): Node[] {
+export function collectNodesFromMultiple(
+    roots: readonly DispatchNode[]
+): DispatchNode[] {
     const visited = new Set<symbol>();
-    const nodes: Node[] = [];
-    const stack: Node[] = [...roots];
+    const nodes: DispatchNode[] = [];
+    const stack: DispatchNode[] = [...roots];
 
     while (stack.length > 0) {
         const node = stack.pop()!;
@@ -74,13 +76,13 @@ export function collectNodesFromMultiple(roots: Node[]): Node[] {
  * @returns Nodes in topological (execution) order
  */
 export function topologicalSort(
-    roots: Node[],
-    priority?: Map<symbol, number>,
-): Node[] {
+    roots: readonly DispatchNode[],
+    priority?: Map<symbol, number>
+): DispatchNode[] {
     const allNodes = collectNodesFromMultiple(roots);
 
     // Build in-degree map (only counting edges within the reachable subgraph)
-    const reachable = new Set(allNodes.map(n => n._id));
+    const reachable = new Set(allNodes.map((n) => n._id));
     const inDegree = new Map<symbol, number>();
 
     // Count in-degrees: for each node, count how many of its dependencies are in the subgraph
@@ -95,7 +97,7 @@ export function topologicalSort(
     }
 
     // Index by id for fast lookup
-    const nodeById = new Map<symbol, Node>();
+    const nodeById = new Map<symbol, DispatchNode>();
     for (const node of allNodes) {
         nodeById.set(node._id, node);
     }
@@ -117,36 +119,40 @@ export function topologicalSort(
 
     // Helper: sort an array of nodes by priority (lower first), stable for equal priorities
     // why is this necessary? imagine this example:
-    // A = v.pass(k, { inout: buffer1 });
-    // B = v.pass(k, { inout: buffer1 });
-    // C = v.pass(k, { inout: A.inout });
+    // A = k({ inout: buffer1 });
+    // B = k({ inout: buffer1 });
+    // C = k({ inout: A.inout });
     // v.run(A, B, C);
     // ^ without sortByPriority, A and B will simultaneously become free,
     // and will both be in-degree-0 at the same time, however without sorting by
-    // priority, B will be scheduled before A, but the user intent was to 
+    // priority, B will be scheduled before A, but the user intent was to
     // schedule A before B. To fix this when nodes become free we're sorting them
-    // such that they're ordered in the same way in which they appear when 
+    // such that they're ordered in the same way in which they appear when
     // calling v.run(...)
-    const sortByPriority = (nodes: Node[]): void => {
+    const sortByPriority = (nodes: DispatchNode[]): void => {
         if (priority && nodes.length > 1) {
-            nodes.sort((a, b) =>
-                (priority.get(a._id) ?? Infinity) - (priority.get(b._id) ?? Infinity)
+            nodes.sort(
+                (a, b) =>
+                    (priority.get(a._id) ?? Infinity) -
+                    (priority.get(b._id) ?? Infinity)
             );
         }
     };
 
     // Kahn's algorithm: start with all nodes that have in-degree 0, sorted by priority
-    const queue: Node[] = allNodes.filter(n => inDegree.get(n._id) === 0);
+    const queue: DispatchNode[] = allNodes.filter(
+        (n) => inDegree.get(n._id) === 0
+    );
     sortByPriority(queue);
 
-    const sorted: Node[] = [];
+    const sorted: DispatchNode[] = [];
     while (queue.length > 0) {
         const node = queue.shift()!;
         sorted.push(node);
 
         const deps = dependents.get(node._id);
         if (deps) {
-            const newlyFreed: Node[] = [];
+            const newlyFreed: DispatchNode[] = [];
             for (const depId of deps) {
                 const degree = inDegree.get(depId)! - 1;
                 inDegree.set(depId, degree);
@@ -163,8 +169,8 @@ export function topologicalSort(
     if (sorted.length !== allNodes.length) {
         throw new Error(
             'Volten Error: Cycle detected in compute graph. ' +
-            `Expected ${allNodes.length} nodes but only ${sorted.length} could be sorted. ` +
-            'Check that no node depends on itself (directly or indirectly).'
+                `Expected ${allNodes.length} nodes but only ${sorted.length} could be sorted. ` +
+                'Check that no node depends on itself (directly or indirectly).'
         );
     }
 

@@ -9,7 +9,8 @@ You can enable debugging when you create the node,
 add debug functions in WGSL, run the node, then read its debug output.
 
 ```ts
-const kernel = new Kernel(`
+const debugScale = kernel({
+    shader: `
   fn main(gid: vec3u) {
     inout[gid.x] = inout[gid.x] * mult;
 
@@ -20,12 +21,10 @@ const kernel = new Kernel(`
     // Only gid.x == 2u will emit debug logs
     debugF32("value", inout[gid.x]);
   }
-`);
-
-const node = v.pass(kernel, { inout, mult }, { debug: true });
-
+`
+});
+const node = debugScale({ inout, mult }, { debug: true });
 v.run(node);
-
 const debug = await v.readDebug(node);
 debug.print();
 ```
@@ -63,5 +62,6 @@ debugVec3f("first item", data[gid.x]);
 `enableDebug()` applies only to the current invocation. From that point on, debug calls in that invocation emit logs. Other invocations keep running normally, but their debug calls stay silent.
 
 :::caution[Opt-in node]
-`v.readDebug(node)` only works for nodes created with debug support. Use `v.pass(kernel, bindings, { debug: true })`.
+`v.readDebug(node)` only works for primitive kernel nodes created with debug
+support. Use `operation(bindings, { debug: true })`.
 :::

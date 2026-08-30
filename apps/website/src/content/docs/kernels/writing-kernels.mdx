@@ -3,16 +3,19 @@ title: Writing Kernels
 description: Write the WGSL function that Volten will run as a compute kernel.
 ---
 
-A `Kernel` contains the WGSL code that runs on the GPU.
+A callable kernel contains the WGSL code that runs on the GPU and creates a
+logical node when invoked with bindings.
 
 ```ts
-import { Kernel } from '@volten/core';
+import { kernel } from '@volten/core';
 
-const scale = new Kernel(`
+const scale = kernel({
+    shader: `
   fn main(gid: vec3u) {
     output[gid.x] = input[gid.x] * multiplier;
   }
-`);
+`
+});
 ```
 
 You write a `main` function. Volten adds the compute entry point, workgroup size, bindings, and safety guard around it.
@@ -21,20 +24,22 @@ You write a `main` function. Volten adds the compute entry point, workgroup size
 
 Volten expands a few parameter names in `main`:
 
-| Name | Type | Meaning |
-| --- | --- | --- |
-| `gid` | `vec3u` or `vec3<u32>` | Global invocation id |
-| `lid` | `u32` | Local invocation index |
-| `lid3` | `vec3u` or `vec3<u32>` | Local invocation id |
-| `wid` | `vec3u` or `vec3<u32>` | Workgroup id |
-| `nwg` | `vec3u` or `vec3<u32>` | Number of workgroups |
+| Name   | Type                   | Meaning                |
+| ------ | ---------------------- | ---------------------- |
+| `gid`  | `vec3u` or `vec3<u32>` | Global invocation id   |
+| `lid`  | `u32`                  | Local invocation index |
+| `lid3` | `vec3u` or `vec3<u32>` | Local invocation id    |
+| `wid`  | `vec3u` or `vec3<u32>` | Workgroup id           |
+| `nwg`  | `vec3u` or `vec3<u32>` | Number of workgroups   |
 
 ```ts
-const kernel = new Kernel(`
+const writeLocalIds = kernel({
+    shader: `
   fn main(gid: vec3u, lid: u32) {
     data[gid.x] = f32(lid);
   }
-`);
+`
+});
 ```
 
 You can also write the full WGSL builtin syntax yourself.
@@ -50,7 +55,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 Only the function named `main` is treated as the kernel entry point. Other functions are left alone.
 
 ```ts
-const kernel = new Kernel(`
+const squareValues = kernel({
+    shader: `
   fn square(x: f32) -> f32 {
     return x * x;
   }
@@ -58,15 +64,44 @@ const kernel = new Kernel(`
   fn main(gid: vec3u) {
     data[gid.x] = square(data[gid.x]);
   }
-`);
+`
+});
 ```
+
+## Context-Dependent Shaders
+
+Pass a function as `shader` when the WGSL should depend on the active GPU. The
+function receives the device and its enabled features and limits, and returns
+the WGSL source to use.
+
+```ts
+const processValues = kernel({
+    shader: ({ device, features, limits }) => {
+        if (features.has('shader-f16')) {
+            return shaderUsingF16;
+        }
+
+        if (limits.maxComputeWorkgroupStorageSize >= 32768) {
+            return shaderUsingMoreWorkgroupStorage;
+        }
+
+        return portableShader;
+    },
+    threads: 'input'
+});
+```
+
+The selector runs when a node is first materialized by a run, wait, or read
+operation, not when `kernel()` is called. It is synchronous, must return a WGSL
+string, and is resolved once for that materialized node.
 
 ## Labels
 
 Add a label when you want clearer debug output and browser GPU tooling names.
 
 ```ts
-const kernel = new Kernel(`...`, {
+const scaleValues = kernel({
+    shader: `...`,
     label: 'scale values'
 });
 ```

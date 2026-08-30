@@ -16,9 +16,8 @@ v.run(node);
 Pass an array to batch multiple nodes in one submission.
 
 ```ts
-const A = v.pass(K1, { data });
-const B = v.pass(K2, { otherData });
-
+const A = K1({ data });
+const B = K2({ otherData });
 v.run([A, B]);
 ```
 
@@ -31,9 +30,8 @@ When batched passes use different data, they can be submitted together without n
 When batched passes use the same data, order matters.
 
 ```ts
-const A = v.pass(K1, { data });
-const B = v.pass(K2, { data });
-
+const A = K1({ data });
+const B = K2({ data });
 v.run([A, B]);
 ```
 
@@ -41,15 +39,14 @@ Both nodes touch the same concrete buffer, so Volten preserves the array order: 
 
 That means `v.run([A, B])` is still safe for simple sequential work over the same buffer.
 
-## When One Pass Needs Another
+## When One Node Needs Another
 
 If one pass should consume a buffer produced by another pass,
 to make the dependency requirement clear, you can also use a handle from the first node.
 
 ```ts
-const A = v.pass(K1, { input, output: mid });
-const B = v.pass(K2, { input: A.output, output: result });
-
+const A = K1({ input, output: mid });
+const B = K2({ input: A.output, output: result });
 v.run(B);
 ```
 

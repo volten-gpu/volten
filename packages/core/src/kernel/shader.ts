@@ -1,8 +1,5 @@
-import {
-    finalizeKernelSource,
-    type EntryPointSetup
-} from './builtins.js';
-import type { Kernel } from './kernel.js';
+import { finalizeKernelSource, type EntryPointSetup } from './builtins.js';
+import type { ResolvedKernel } from './kernel.js';
 
 export interface ShaderTransform {
     readonly transformSource?: (source: string) => string;
@@ -35,7 +32,7 @@ function collectEntryPointSetups(
  * Prepare executable kernel WGSL before binding declarations are added.
  */
 export function prepareKernelShader(
-    kernel: Kernel,
+    kernel: ResolvedKernel,
     preparation: KernelShaderPreparation = {}
 ): PreparedKernelShader {
     const transforms = preparation.transforms ?? [];

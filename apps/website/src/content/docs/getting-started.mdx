@@ -30,19 +30,21 @@ This example creates one GPU buffer, multiplies each value by a uniform, and rea
 If the result contains `[10, 20, 30, 40]`, Volten is working in your environment.
 
 ```ts
-import { volten, Buffer, Kernel, Uniform } from '@volten/core';
+import { volten, Buffer, kernel, Uniform } from '@volten/core';
 
 const v = await volten();
 const inout = new Buffer([1, 2, 3, 4], 'f32', 'rw');
 const mult = new Uniform(10, 'f32');
 
-const kernel = new Kernel(`
+const scale = kernel({
+    shader: `
   fn main(gid: vec3u) {
     inout[gid.x] = inout[gid.x] * mult;
   }
-`);
+`
+});
 
-const node = v.pass(kernel, { inout, mult });
+const node = scale({ inout, mult });
 v.run(node);
 
 console.log(await v.read(inout));

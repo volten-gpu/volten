@@ -1,64 +1,76 @@
-// ============================================================================
-// Graph Compiler — Multi-Terminal Merge & Synthetic Dependency Injection
-// ============================================================================
-//
-// This module sits between graph construction (v.pass) and GPU execution
-// (_submit). Its job is to take one or more terminal nodes and produce
-// a single, correctly-ordered ExecutionPlan.
-//
-// # Why this exists
-//
-// When the user writes:
-//
-//   v.run(D, E, F)
-//
-// each terminal (by terminal node we refer to D, E, F in the example) might be the tip of its own subtree.
-// Some subtrees may share concrete buffers without any Handle-based connection:
-//
-//   let E = v.pass(k2, { inout });          // uses buffer "inout"
-//   let K = v.pass(k6, { in: inout });      // also uses buffer "inout"
-//   let L = v.pass(k6, { in: K.in });
-//   v.run(E, L);
-//
-// Here, E and K both touch "inout" but have NO Handle-based dependency.
-// Without intervention, topological sort could execute K before E,
-// producing incorrect results (K would read stale data).
-// Another problem is that E and K could be executed within the same compute pass,
-// causing Read-Write conflicts.
-//
-// The compiler detects shared concrete buffers between independent
-// subtrees and injects "synthetic dependencies" to enforce the
-// positional order specified in v.run().
-//
-// # When synthetic deps are NOT needed
-//
-// If two terminals share a subtree through Handle-based connections
-// (e.g., v.run(D,G) and both D and G depend on C via C.out), the dependency is
-// already captured. No synthetic dep is injected — the topological sort
-// naturally places C before both D and G, and D/G remain unordered
-// relative to each other (they can run in parallel).
-//
-// # Priority-based tiebreaking
-//
-// Even after synthetic deps are injected, Kahn's algorithm may encounter
-// multiple nodes that are simultaneously free. The compiler assigns each
-// node a priority equal to the minimum terminal index it belongs to.
-// This priority is passed to topologicalSort as a tiebreaker, ensuring
-// that v.run(A, B, C) produces execution order consistent with the user's
-// positional intent at every level of the graph.
-//
-// # Volten auto-allocated buffers
-//
-// Volten auto-allocated buffers (future feature) are exempt from overlap
-// detection because they only exist through Handle references in the
-// graph. Two independent nodes can never accidentally share a
-// Volten-owned buffer — Volten controls the allocation and would
-// never assign the same buffer to two live nodes.
-//
-// ============================================================================
+/**
+ * Turns materialized invocations into one ordered list of GPU dispatches.
+ *
+ * # Invocations and terminals
+ *
+ * Each item passed to v.run() becomes one invocation:
+ *
+ *     v.run([A, B]);
+ *            |  |
+ *            0  1
+ *
+ * A kernel invocation has one terminal. A plan may have more than one:
+ *
+ *   Invocation A                 Invocation B
+ *
+ *   R1 -> R2 -> R3               B1 -> B2
+ *   H1 ------> H2
+ *
+ *   terminals: [R3, H2]          terminals: [B2]
+ *
+ * R3 and H2 are both ends of Invocation A. The array does not add a
+ * dependency between them. They stay independent unless their handles
+ * already connect them.
+ *
+ * If two terminals inside one plan need an order, the plan must use a handle:
+ *
+ *   const A = update({ data });
+ *   const B = update({ data: A.data });
+ *
+ *   terminals: [A, B]     A -> B
+ *
+ * The order of properties returned by a plan is not an execution order.
+ *
+ * # Why topologicalSort() is not enough
+ *
+ * Handles create normal graph dependencies:
+ *
+ *   const A = update({ data });
+ *   const B = update({ data: A.data });
+ *
+ *   A -> B
+ *
+ * Sometimes two invocations use the same Buffer directly:
+ *
+ *   const A = update({ data });
+ *   const B = update({ data });
+ *   v.run([A, B]);
+ *
+ *   A(data)       B(data)
+ *      no handle edge
+ *
+ * A and B still need the order given to v.run(). A topological sort cannot
+ * discover that order because the graph has no edge between them.
+ *
+ * This compiler fills that gap. It:
+ *
+ * 1. Finds every dispatch used by each invocation.
+ * 2. Finds concrete buffers used by separate invocations.
+ * 3. Adds temporary dependencies where v.run() order must be kept.
+ * 4. Topologically sorts all terminals into one dispatch list.
+ *
+ * "Temporary" means these dependencies only exist in this compile call.
+ * The cached dispatch graph is not changed.
+ *
+ * # Future allocated buffers
+ *
+ * A future Volten-owned buffer should normally move through handles. Those
+ * handles already describe its order. This shared-buffer check is mainly for
+ * concrete buffers passed directly to separate invocations.
+ */
 
-import type { Node } from './node.js';
-import { collectNodes, topologicalSort } from './scheduler.js';
+import type { DispatchNode } from './dispatch-node.js';
+import { collectNodesFromMultiple, topologicalSort } from './scheduler.js';
 import { resolveConcreteBuffer } from '../kernel/resource-resolution.js';
 import type { Buffer } from '../data/buffer.js';
 import type { RawBuffer } from '../data/raw-buffer.js';
@@ -70,89 +82,104 @@ export { resolveConcreteBuffer } from '../kernel/resource-resolution.js';
  */
 export interface ExecutionPlan {
     /** Nodes in topological (execution) order. */
-    readonly sorted: readonly Node[];
+    readonly sorted: readonly DispatchNode[];
 }
 
 /**
- * Compile one or more terminal nodes into an ExecutionPlan.
+ * The physical ends of one logical node passed to v.run().
  *
- * This is the central scheduling function. It:
- *
- * 1. Iterates terminals in positional order
- * 2. Collects each terminal's subtree
- * 3. **Detects buffer overlap** — for each subtree, checks if any node uses
- *    a concrete buffer that was already used by a node exclusive to a
- *    previous terminal's subtree. Shared nodes (appearing in multiple
- *    subtrees) are excluded from overlap checks since they're already
- *    connected via Handle-based dependencies.
- * 4. **Injects synthetic dependencies** — when overlap is found between
- *    exclusive nodes of different terminals, the previous terminal becomes
- *    a dependency of the current terminal. This ensures Kahn's algorithm
- *    places the previous terminal's subtree first.
- * 5. **Builds a priority map** — each node gets a priority equal to the
- *    minimum terminal index it belongs to. This is passed to topologicalSort
- *    as a tiebreaker so that nodes affiliated with earlier terminals are
- *    scheduled first.
- * 6. **Topologically sorts** — the (possibly augmented) terminal list is
- *    sorted directly
- *
- * @param terminals - Terminal nodes in the order specified by v.run()
- * @returns An ExecutionPlan with nodes in safe execution order
- *
- * @example
- * ```ts
- * // Independent trees with shared buffer:
- * let E = v.pass(k2, { inout });
- * let K = v.pass(k6, { in: inout });
- * let L = v.pass(k6, { in: K.in });
- * compile([E, L]) // → [E, K, L] (E before K due to shared "inout")
- * ```
+ * Multiple terminals belong to the same invocation, but they do not depend
+ * on each other just because they are in this array.
  */
-export function compile(terminals: Node[]): ExecutionPlan {
-    // Question: why is this function necessary? can't we simply use the topological sort with the
-    // graph-api?
-    // Answer: No, because it woulnd't track this kind of dependencies:
-    // A = v.pass(k, { inout: buffer1 });
-    // B = v.pass(k, { inout: buffer1 });
-    // C = v.pass(k, { inout: buffer1 });
-    // v.run(A, B, C);
-    //
-    // ^ these passes can't run all in parallel while keeping the same Pass open and adding multiple
-    // dispatches, because we would risk Read-Write conflicts, this is the reason why this function exists,
-    // it tries to find the implicit dependencies based on which buffers are being used by which node.
-    // when it finds these dependencies, it will inject synthetic graph-dependencies and only then we run
-    // the topological sort
+export interface MaterializedInvocation {
+    readonly terminals: readonly DispatchNode[];
+}
 
-    if (terminals.length === 0) {
+interface InvocationCompileState {
+    readonly invocation: MaterializedInvocation;
+    readonly reachableNodes: readonly DispatchNode[];
+    /** Earlier invocations that must finish first. */
+    readonly requiredInvocations: Set<number>;
+}
+
+/**
+ * Merges materialized invocations and returns a safe dispatch order.
+ */
+export function compile(
+    invocations: readonly MaterializedInvocation[]
+): ExecutionPlan {
+    if (invocations.length === 0) {
         throw new Error(
-            'Volten Error: compile() called with no terminal nodes.'
+            'Volten Error: compile() called with no materialized invocations.'
         );
     }
 
-    // Fast path: single terminal, no merging needed
-    if (terminals.length === 1) {
-        return { sorted: topologicalSort([terminals[0]]) };
+    // With one invocation, handle dependencies already describe its order.
+    if (invocations.length === 1) {
+        return { sorted: topologicalSort(invocations[0].terminals) };
     }
 
-    // -----------------------------------------------------------------------
-    // Phase 1: Discover subtrees + identify shared vs exclusive nodes
-    // -----------------------------------------------------------------------
-
-    // Each node X in this map contains a set of all the terminal indices where X appears in their subtree
-    /*
-            A              G                   F           <-- terminal nodes (A,G,F)
-           / \            /                     \
-          B   C          C  <-- set = (G,A)      K  <-- set = (F)
-         / \                                      \
-        D   E  <-- set(A)                          D  <-- set = (A, F) 
-    */
+    // Phase 1: find every dispatch used by each invocation.
+    //
+    // A dispatch may be reachable from more than one invocation:
+    //
+    //   Invocation 0                         Invocation 1
+    //   terminals: [D]                      terminals: [G]
+    //
+    //                A -> B -> C
+    //                          | \
+    //                          D  G
+    //
+    // Walking back from D finds A, B, C and D.
+    // Walking back from G finds A, B, C and G.
+    //
+    // Ownership:
+    //
+    //   A, B, C -> { 0, 1 }   shared
+    //   D       -> { 0 }      exclusive to invocation 0
+    //   G       -> { 1 }      exclusive to invocation 1
+    //
+    // A larger example can share different nodes:
+    //
+    //   Invocation 0       Invocation 1       Invocation 2
+    //   terminals: [A]     terminals: [G]     terminals: [F]
+    //
+    //   A                  G                  F
+    //   +-- B              +-- C              +-- K
+    //   |   +-- D                                 +-- D
+    //   |   +-- E
+    //   +-- C
+    //
+    // The two C labels are the same dispatch.
+    // The two D labels are also the same dispatch.
+    //
+    //   C -> { 0, 1 }
+    //   D -> { 0, 2 }
+    //   E -> { 0 }
+    //   K -> { 2 }
+    //
+    // A multi-terminal invocation uses the same rule:
+    //
+    //   Invocation 0
+    //   terminals: [D, G]
+    //
+    //                A -> B -> C
+    //                          | \
+    //                          D  G
+    //
+    // collectNodesFromMultiple([D, G]) returns A, B, C, D and G once.
+    // It does not add an edge between D and G.
     const nodeOwnership = new Map<symbol, Set<number>>();
-    const subtrees: Node[][] = [];
+    const states: InvocationCompileState[] = invocations.map((invocation) => ({
+        invocation,
+        reachableNodes: collectNodesFromMultiple(invocation.terminals),
+        requiredInvocations: new Set()
+    }));
 
-    for (let i = 0; i < terminals.length; i++) {
-        const subtree = collectNodes(terminals[i]);
-        subtrees.push(subtree);
-        for (const node of subtree) {
+    for (let i = 0; i < states.length; i++) {
+        // foreach reachable-node from terminal i
+        // (although terminal is not the perfect terminology, "invocation" is better)
+        for (const node of states[i].reachableNodes) {
             let owners = nodeOwnership.get(node._id);
             if (!owners) {
                 owners = new Set();
@@ -162,106 +189,129 @@ export function compile(terminals: Node[]): ExecutionPlan {
         }
     }
 
-    // A node is "exclusive" to a terminal if it only appears in that
-    // terminal's subtree. Shared nodes are already connected via Handles
-    // and don't need synthetic deps.
-    /*
-            A           G
-           / \         /
-          B   C       C   <--- C is not exclusive to A or G since it appears in both subtrees
-         / \   
-        D   E    <-- E is exclusive to A since E only appears in the subtree of A
-    */
-    const isExclusive = (nodeId: symbol, terminalIndex: number): boolean => {
+    // Shared dispatches are already connected through handles. Checking them
+    // again could create an order that the graph does not need. The buffer
+    // check below only looks at exclusive dispatches.
+    const isExclusive = (nodeId: symbol, invocationIndex: number): boolean => {
         const owners = nodeOwnership.get(nodeId);
         return (
             owners !== undefined &&
             owners.size === 1 &&
-            owners.has(terminalIndex)
+            owners.has(invocationIndex)
         );
     };
 
-    // -----------------------------------------------------------------------
-    // Phase 2: Detect buffer overlap between exclusive nodes
-    // -----------------------------------------------------------------------
+    // Phase 2: find separate invocations that use the same concrete buffer.
+    //
+    // Example:
+    //
+    //   Invocation 0             Invocation 1
+    //   terminals: [E]           terminals: [L]
+    //
+    //   E(sharedBuffer)          K(sharedBuffer) -> L
+    //
+    // this is equivalent to:
+    // let E = k({ input });
+    // let K = k({ input });
+    // let L = k({ K.input });
+    //
+    //
+    // E and K have no handle edge. Their shared Buffer tells us that
+    // Invocation 0 must stay before Invocation 1.
 
-    // Maps concrete buffer → the terminal index that "owns" it (most recent
-    // terminal whose exclusive nodes use this buffer).
-    // When we find a conflict, we inject a synthetic dep.
-    const bufferToTerminal = new Map<Buffer | RawBuffer, number>();
+    // Remember the last invocation that used each concrete buffer.
+    const bufferToInvocation = new Map<Buffer | RawBuffer, number>();
 
-    // Track which terminals need synthetic deps: syntheticDeps[i] contains
-    // terminal indices that must complete before terminal i.
-    const syntheticDeps: Set<number>[] = terminals.map(() => new Set());
-
-    for (let i = 0; i < terminals.length; i++) {
-        for (const node of subtrees[i]) {
-            // Only check exclusive nodes — shared nodes are already
-            // connected via Handle-based dependencies
+    for (let i = 0; i < states.length; i++) {
+        const state = states[i];
+        for (const node of state.reachableNodes) {
             if (!isExclusive(node._id, i)) continue;
 
             for (const value of Object.values(node._bindings)) {
                 const concrete = resolveConcreteBuffer(value);
                 if (concrete === null) continue;
 
-                const previousOwner = bufferToTerminal.get(concrete);
+                const previousOwner = bufferToInvocation.get(concrete);
                 if (previousOwner !== undefined && previousOwner !== i) {
-                    // Conflict: this buffer was used by exclusive nodes
-                    // of a previous terminal. Inject synthetic dep.
-                    syntheticDeps[i].add(previousOwner);
+                    state.requiredInvocations.add(previousOwner);
                 }
-                // Claim this buffer for the current terminal
-                bufferToTerminal.set(concrete, i);
+                bufferToInvocation.set(concrete, i);
             }
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Phase 3: Inject synthetic dependencies into terminal nodes
-    // -----------------------------------------------------------------------
+    const compiledInvocations: MaterializedInvocation[] = [];
 
-    const finalTerminals: Node[] = [];
-
-    for (let i = 0; i < terminals.length; i++) {
-        if (syntheticDeps[i].size > 0) {
-            // This terminal needs synthetic deps — create a wrapper node
-            // that has the original deps + the synthetic ones.
-            // Use finalTerminals (not originals) so chained synthetic deps
-            // compose correctly: if G depends on F and F depends on E,
-            // G's dep must point to the wrapped F that already includes E.
-            const extraDeps = [...syntheticDeps[i]].map(
-                (j) => finalTerminals[j]
+    // Phase 3: add temporary dependencies to invocation terminals.
+    //
+    // If Invocation 0 must finish before Invocation 1:
+    //
+    //   Invocation 0               Invocation 1 before wrapping
+    //   terminals: [R3, H2]        terminals: [B2, D4]
+    //
+    // Each terminal in Invocation 1 gets both earlier terminals:
+    //
+    //   R3 ---------> B2'
+    //   H2 ---------> B2'
+    //                  + original B2 dependencies
+    //
+    //   R3 ---------> D4'
+    //   H2 ---------> D4'
+    //                  + original D4 dependencies
+    //
+    // R3 and H2 still do not depend on each other. The new edges only keep
+    // the two v.run() invocations in the requested order.
+    for (const state of states) {
+        if (state.requiredInvocations.size > 0) {
+            // Use terminals that were already wrapped. This keeps longer
+            // chains intact:
+            //
+            //   v.run([A, B, C]) with one shared buffer
+            //
+            //   A -> B' -> C'
+            const extraDeps = [...state.requiredInvocations].flatMap(
+                (j) => compiledInvocations[j].terminals
             );
-            const original = terminals[i];
-            const wrappedDeps = [...original._dependencies, ...extraDeps];
+            const wrappedTerminals = state.invocation.terminals.map(
+                (original) => {
+                    const wrappedDeps = [
+                        ...original._dependencies,
+                        ...extraDeps
+                    ];
 
-            // Shallow clone with augmented dependencies
-            const wrapped: Node = Object.create(null);
-            for (const key of Object.keys(original) as (keyof Node)[]) {
-                (wrapped as any)[key] = (original as any)[key];
-            }
-            // Also copy symbol-keyed and prototype properties won't matter
-            // since we only need _id, _dependencies, etc.
-            (wrapped as any)._dependencies = Object.freeze(wrappedDeps);
-            finalTerminals.push(wrapped);
+                    // Clone the terminal so another v.run() call can compile
+                    // the same graph in a different order.
+                    const wrapped: DispatchNode = Object.create(null);
+                    for (const key of Object.keys(
+                        original
+                    ) as (keyof DispatchNode)[]) {
+                        (wrapped as any)[key] = (original as any)[key];
+                    }
+                    (wrapped as any)._dependencies = Object.freeze(wrappedDeps);
+                    return wrapped;
+                }
+            );
+            compiledInvocations.push({ terminals: wrappedTerminals });
         } else {
-            finalTerminals.push(terminals[i]);
+            compiledInvocations.push(state.invocation);
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Phase 4: Build priority map + topological sort
-    // -----------------------------------------------------------------------
-
-    // Each node's priority is the minimum terminal index it belongs to.
-    // This ensures that when multiple nodes become free simultaneously,
-    // nodes affiliated with earlier terminals are scheduled first.
+    // Phase 4: sort the graph.
+    //
+    // Several dispatches may be ready at the same time. In that case, prefer
+    // dispatches from earlier v.run() arguments. Dispatches in the same
+    // invocation have the same priority, so this does not order sibling
+    // terminals such as R3 and H2.
     const priority = new Map<symbol, number>();
     for (const [nodeId, owners] of nodeOwnership) {
         priority.set(nodeId, Math.min(...owners));
     }
 
-    const sorted = topologicalSort(finalTerminals, priority);
+    const sorted = topologicalSort(
+        compiledInvocations.flatMap((invocation) => invocation.terminals),
+        priority
+    );
 
     return { sorted };
 }

@@ -6,8 +6,8 @@ description: Learn how Volten prepares, batches, and runs GPU work.
 Execution in Volten starts by creating nodes.
 
 ```ts
-const A = v.pass(K1, { data });
-const B = v.pass(K2, { otherData });
+const A = K1({ data });
+const B = K2({ otherData });
 ```
 
 You can run one pass:

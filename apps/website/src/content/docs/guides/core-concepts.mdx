@@ -9,11 +9,11 @@ Start by creating a Volten context:
 
 ```ts
 import { volten } from '@volten/core';
-
 const v = await volten();
 ```
 
-The context is the object you use to create passes, run GPU work, read results, read debug output, and more.
+The context materializes logical nodes for its WebGPU device, runs GPU work,
+reads results, and reads debug output.
 
 If your app already owns a WebGPU device, pass it in:
 
@@ -27,7 +27,6 @@ Use `Buffer` for arrays of values. Use `Uniform` for small configuration values.
 
 ```ts
 import { Buffer, Uniform } from '@volten/core';
-
 const data = new Buffer([1, 2, 3, 4], 'f32', 'rw');
 const scale = new Uniform(2, 'f32');
 ```
@@ -38,16 +37,19 @@ const scale = new Uniform(2, 'f32');
 
 ## Kernels
 
-Use `Kernel` for the WGSL code that runs on the GPU.
+Use `kernel()` to define a callable operation containing the WGSL code that
+runs on the GPU.
 
 ```ts
-import { Kernel } from '@volten/core';
+import { kernel } from '@volten/core';
 
-const kernel = new Kernel(`
+const scale = kernel({
+    shader: `
   fn main(gid: vec3u) {
     data[gid.x] = data[gid.x] * scale;
   }
-`);
+`
+});
 ```
 
 Volten will internally handle pipeline creation, bindings and layouts, shader generation,
@@ -56,15 +58,15 @@ buffer uploads, etc.
 Volten also wraps your function with the compute entry point and workgroup size.
 
 :::note[Thread count]
-Volten can often infer how many invocations to run from one clear input buffer. If a pass has multiple possible input buffers, only raw buffers, or a shape that is not one thread per element, set `threads` on the kernel or pass.
+Volten can often infer how many invocations to run from one clear input buffer. If an invocation has multiple possible input buffers, only raw buffers, or a shape that is not one thread per element, set `threads` on the kernel definition or invocation.
 :::
 
-## Passes
+## Operation Nodes
 
-A pass connects a kernel to its data and returns a runnable node.
+Calling a kernel connects it to data and returns a context-free node.
 
 ```ts
-const node = v.pass(kernel, { data, scale });
+const node = scale({ data, scale });
 v.run(node);
 ```
 
