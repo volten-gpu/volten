@@ -6,19 +6,20 @@ description: Multiply every value in a buffer in place.
 This is the smallest useful Volten shape: one mutable buffer, one kernel, one run.
 
 ```ts
-import { volten, Buffer, Kernel } from '@volten/core';
+import { volten, Buffer, kernel } from '@volten/core';
 
 const v = await volten();
-
 const data = new Buffer([1, 2, 3, 4], 'f32', 'rw');
 
-const scale = new Kernel(`
+const scale = kernel({
+    shader: `
   fn main(gid: vec3u) {
     data[gid.x] = data[gid.x] * 2.0;
   }
-`);
+`
+});
 
-const node = v.pass(scale, { data });
+const node = scale({ data });
 v.run(node);
 
 console.log(await v.read(data));

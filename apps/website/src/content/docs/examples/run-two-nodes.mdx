@@ -6,35 +6,36 @@ description: Batch two independent nodes in one run call.
 Pass an array to `v.run()` when you have multiple nodes ready to execute.
 
 ```ts
-import { volten, Buffer, Kernel } from '@volten/core';
+import { volten, Buffer, kernel } from '@volten/core';
 
 const v = await volten();
-
 const a = new Buffer([1, 2, 3, 4], 'f32', 'rw');
 const b = new Buffer([10, 20, 30, 40], 'f32', 'rw');
 
-const doubleA = new Kernel(`
+const doubleA = kernel({
+    shader: `
   fn main(gid: vec3u) {
     a[gid.x] = a[gid.x] * 2.0;
   }
-`);
+`
+});
 
-const addOneToB = new Kernel(`
+const addOneToB = kernel({
+    shader: `
   fn main(gid: vec3u) {
     b[gid.x] = b[gid.x] + 1.0;
   }
-`);
+`
+});
 
-const A = v.pass(doubleA, { a });
-const B = v.pass(addOneToB, { b });
-
+const A = doubleA({ a });
+const B = addOneToB({ b });
 v.run([A, B]);
 
 const [aResult, bResult] = await v.read([a, b]);
 
 console.log(aResult);
 // Float32Array [2, 4, 6, 8]
-
 console.log(bResult);
 // Float32Array [11, 21, 31, 41]
 ```

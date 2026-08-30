@@ -6,11 +6,13 @@ description: Understand Volten's automatic dispatch bounds guard.
 Volten normally protects kernels from extra invocations at the edge of a dispatch.
 
 ```ts
-const kernel = new Kernel(`
+const doubleValues = kernel({
+    shader: `
   fn main(gid: vec3u) {
     data[gid.x] = data[gid.x] * 2.0;
   }
-`);
+`
+});
 ```
 
 If `data.count` is `100` and the workgroup size is `64`, WebGPU must dispatch two workgroups. That creates up to `128` invocations. Volten injects a guard so invocations `100..127` return before calling your code.
@@ -32,8 +34,8 @@ Without a guard, `gid.x` could go past the end of `data`.
 Advanced kernels can opt out.
 
 ```ts
-const kernel = new Kernel(
-    `
+const doubleWithManualBounds = kernel({
+    shader: `
       fn main(gid: vec3u) {
         if (gid.x >= count) {
           return;
@@ -42,14 +44,12 @@ const kernel = new Kernel(
         data[gid.x] = data[gid.x] * 2.0;
       }
     `,
-    {
-        unsafeManualBounds: true,
-        threads: 128
-    }
-);
+    unsafeManualBounds: true,
+    threads: 128
+});
 
 const count = new Uniform(data.count, 'u32');
-const node = v.pass(kernel, { data, count });
+const node = doubleWithManualBounds({ data, count });
 ```
 
 Use this only when your WGSL handles every out-of-range invocation correctly.

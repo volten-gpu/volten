@@ -1,0 +1,87 @@
+---
+title: Compose Work with Plans
+description: Package a reusable multi-kernel graph as one callable operation.
+---
+
+Use `plan()` when one logical operation needs several connected kernels. A plan
+can create its internal graph when a Volten context is available, then expose
+only the handles its callers need.
+
+```ts
+import { volten, Buffer, kernel, plan } from '@volten/core';
+
+const v = await volten();
+const input = new Buffer([1, 2, 3, 4], 'f32', 'r');
+
+const doubleValues = kernel({
+    shader: `
+  fn main(gid: vec3u) {
+    output[gid.x] = input[gid.x] * 2.0;
+  }
+`,
+    threads: 'input'
+});
+
+const addTen = kernel({
+    shader: `
+  fn main(gid: vec3u) {
+    output[gid.x] = input[gid.x] + 10.0;
+  }
+`,
+    threads: 'input'
+});
+
+const doubleThenAddTen = plan((_, inputs: { input: Buffer }) => {
+    const doubled = new Buffer(
+        new Float32Array(inputs.input.count),
+        'f32',
+        'rw'
+    );
+    const result = new Buffer(
+        new Float32Array(inputs.input.count),
+        'f32',
+        'rw'
+    );
+
+    const A = doubleValues({ input: inputs.input, output: doubled });
+    const B = addTen({ input: A.output, output: result });
+
+    return { result: B.output };
+});
+
+const job = doubleThenAddTen({ input });
+v.run(job);
+
+console.log(await v.read(job));
+// { result: Float32Array [12, 14, 16, 18] }
+```
+
+Calling `doubleThenAddTen()` creates a logical plan node without immediately
+building its internal kernels. The builder runs when the node is first
+materialized by a run, wait, or read operation. Its first argument provides the
+active device, features, and limits when the plan needs device-specific logic.
+
+The returned handle map defines the plan's public outputs. Here, `job.result`
+represents the last step, while `A.output` keeps the two internal kernels in the
+correct order. Returning a handle also includes that branch in the work
+scheduled for the plan.
+
+## Device-Aware Plans
+
+Plan builders receive the same materialization context as
+[context-dependent kernel shaders](/kernels/writing-kernels/#context-dependent-shaders).
+They can use it to choose which operations or graph shape to build for the
+active GPU.
+
+```ts
+const adaptivePlan = plan((context, inputs) => {
+    const process = context.features.has('shader-f16')
+        ? processWithF16
+        : processPortably;
+
+    const node = process({ input: inputs.input, output });
+    return { result: node.output };
+});
+```
+
+Learn more: [Invoking Operations](/execution/invoking-operations/), [Nodes and Handles](/execution/nodes-and-handles/).

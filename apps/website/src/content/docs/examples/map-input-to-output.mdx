@@ -6,20 +6,21 @@ description: Read from one buffer and write into another.
 Use separate buffers when you want to keep the input unchanged.
 
 ```ts
-import { volten, Buffer, Kernel } from '@volten/core';
+import { volten, Buffer, kernel } from '@volten/core';
 
 const v = await volten();
-
 const input = new Buffer([1, 2, 3, 4], 'f32', 'r');
 const output = new Buffer([0, 0, 0, 0], 'f32', 'rw');
 
-const doubleValues = new Kernel(`
+const doubleValues = kernel({
+    shader: `
   fn main(gid: vec3u) {
     output[gid.x] = input[gid.x] * 2.0;
   }
-`);
+`
+});
 
-const node = v.pass(doubleValues, { input, output });
+const node = doubleValues({ input, output });
 v.run(node);
 
 console.log(await v.read(output));

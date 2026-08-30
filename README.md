@@ -23,19 +23,21 @@ https://volten-gpu.github.io/getting-started/
 This is how simple it is in Volten to run a compute shader and read back the result:
 
 ```ts
-import { volten, Buffer, Kernel, Uniform } from '@volten/core';
+import { volten, Buffer, kernel, Uniform } from '@volten/core';
 
 const v = await volten();
 const inout = new Buffer([1, 2, 3, 4], 'f32', 'rw');
 const mult = new Uniform(10, 'f32');
 
-const kernel = new Kernel(`
-  fn main(gid: vec3u) {
-    inout[gid.x] = inout[gid.x] * mult;
-  }
-`);
+const multiply = kernel({
+    shader: `
+    fn main(gid: vec3u) {
+      inout[gid.x] = inout[gid.x] * mult;
+    }
+  `
+});
 
-const node = v.pass(kernel, { inout, mult });
+const node = multiply({ inout, mult });
 v.run(node);
 
 console.log(await v.read(inout));
@@ -47,20 +49,22 @@ console.log(await v.read(inout));
 But there's more. Volten includes utilities that speed up compute shader development, including first-class support for shader debugging:
 
 ```ts
-const kernel = new Kernel(`
-  fn main(gid: vec3u) {
-    inout[gid.x] = inout[gid.x] * mult;
+const multiply = kernel({
+    shader: `
+    fn main(gid: vec3u) {
+      inout[gid.x] = inout[gid.x] * mult;
 
-    if (gid.x == 2u) {
-      enableDebug();
+      if (gid.x == 2u) {
+        enableDebug();
+      }
+
+      // Only gid.x == 2u will emit debug logs
+      debugF32("f32 value debug", inout[gid.x]);
     }
+  `
+});
 
-    // Only gid.x == 2u will emit debug logs
-    debugF32("f32 value debug", inout[gid.x]);
-  }
-`);
-
-const node = v.pass(kernel, { inout, mult }, { debug: true });
+const node = multiply({ inout, mult }, { debug: true });
 v.run(node);
 
 const debugRes = await v.readDebug(node);

@@ -1,9 +1,9 @@
-import type { Node } from '../graph/node.js';
+import type { DispatchNode } from '../graph/dispatch-node.js';
 import { resolveBindableResource } from './resource-resolution.js';
 
 export function getOrCreateNodeBindGroup(
     device: GPUDevice,
-    node: Node
+    node: DispatchNode
 ): GPUBindGroup {
     const entries: GPUBindGroupEntry[] = [];
     const cacheParts: string[] = [];

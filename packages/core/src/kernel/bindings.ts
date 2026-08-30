@@ -5,13 +5,16 @@ import { Buffer } from '../data/buffer.js';
 import { RawBuffer } from '../data/raw-buffer.js';
 import { Uniform } from '../data/uniform.js';
 import { resolveConcreteBuffer } from './resource-resolution.js';
-import { type Handle, isHandle } from '../graph/node.js';
+import {
+    type DispatchHandle,
+    isDispatchHandle
+} from '../graph/dispatch-node.js';
 import type { TypeDescriptor } from '../types/schema.js';
 import {
     generateTypeDeclarations,
     type BindingTypeInfo
 } from './type-declarations.js';
-import type { Kernel } from './kernel.js';
+import type { ResolvedKernel } from './kernel.js';
 import {
     type UniformLayoutMode,
     UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION
@@ -32,7 +35,7 @@ export interface BindingEntry {
     /** WGSL access qualifier ("read" or "read_write"), storage-only */
     readonly wgslAccess?: string;
     /** The source object: Buffer, RawBuffer, Uniform, or Handle */
-    readonly source: Buffer | RawBuffer | Uniform | Handle;
+    readonly source: Buffer | RawBuffer | Uniform | DispatchHandle;
     /** Whether this is a Handle from a previous node */
     readonly isHandle: boolean;
     /** Optional Volten type descriptor when available (Buffer/Uniform chains) */
@@ -64,7 +67,7 @@ function isUniform(value: unknown): value is Uniform {
  * Resolve the wgslType and wgslAccess from a Handle by walking up the Handle chain.
  * Recursively follows Handle → source node's binding until a concrete Buffer/RawBuffer is found.
  */
-function resolveHandleSource(handle: Handle): {
+function resolveHandleSource(handle: DispatchHandle): {
     wgslType: string;
     wgslAddressSpace: 'storage' | 'uniform';
     wgslAccess?: string;
@@ -93,8 +96,8 @@ function resolveHandleSource(handle: Handle): {
             typeDescriptor: source.type
         };
     }
-    if (isHandle(source)) {
-        return resolveHandleSource(source as Handle);
+    if (isDispatchHandle(source)) {
+        return resolveHandleSource(source);
     }
     throw new Error(
         `Volten Error: Handle "${handle._name}" does not resolve to a Buffer, RawBuffer, or Uniform.`
@@ -154,7 +157,7 @@ export function generateBindings(
                 isHandle: false,
                 typeDescriptor: value.type
             });
-        } else if (isHandle(value)) {
+        } else if (isDispatchHandle(value)) {
             // Resolve actual type by walking up the Handle chain
             const resolved = resolveHandleSource(value);
             entries.push({
@@ -176,7 +179,7 @@ export function generateBindings(
         } else {
             throw new Error(
                 `Volten Error: Binding "${name}" has unsupported type: ${typeof value}.\n` +
-                    `  Expected: Buffer, RawBuffer, Uniform, or Handle (output from a previous v.pass()).`
+                    `  Expected: Buffer, RawBuffer, Uniform, or Handle from another operation.`
             );
         }
     }
@@ -210,7 +213,7 @@ export function generateBindingWgsl(entries: BindingEntry[]): string {
 /**
  * Assemble the full shader source around an already-prepared kernel source.
  *
- * `assembleFullShader` is thus responsible for pass-time composition:
+ * `assembleFullShader` is thus responsible for materialization-time composition:
  * type declarations, binding declarations, optional extension lines.
  *
  * @param entries - Classified binding entries
@@ -269,17 +272,17 @@ export function assembleFullShader(
  * Resolve thread dispatch dimensions from kernel config and bindings.
  *
  * Resolution order:
- * 1. Pass-time override (options.threads)
+ * 1. Invocation override (options.threads)
  * 2. Kernel-level threads spec
  * 3. Auto-inference from single buffer binding
  *
  * @param kernel - The kernel definition
  * @param bindings - User-provided bindings record
- * @param passThreads - Optional pass-time thread override
+ * @param passThreads - Optional invocation thread override
  * @returns Dispatch dimensions as [x, y, z]
  */
 export function resolveBounds(
-    kernel: Kernel,
+    kernel: ResolvedKernel,
     bindings: Record<string, unknown>,
     passThreads?:
         | number
@@ -330,7 +333,7 @@ export function resolveBounds(
     if (bufferBindings.length === 0) {
         throw new Error(
             'Volten Error: Cannot auto-infer thread count — no buffer bindings found.\n' +
-                '  Hint: Specify threads explicitly: new Kernel(`...`, { threads: 1024 })'
+                '  Hint: Specify threads explicitly: kernel({ shader: `...`, threads: 1024 })'
         );
     }
 
@@ -354,12 +357,12 @@ export function resolveBounds(
     throw new Error(
         `Volten Error: Cannot auto-infer thread count — ${inputBuffers.length} input buffers found.\n` +
             `  Bindings: ${inputBuffers.map(([n]) => n).join(', ')}\n` +
-            `  Hint: Specify threads explicitly: new Kernel(\`...\`, { threads: '${inputBuffers[0]?.[0] ?? 'input'}' })`
+            `  Hint: Specify threads explicitly: kernel({ shader: \`...\`, threads: '${inputBuffers[0]?.[0] ?? 'input'}' })`
     );
 }
 
 export function resolveDispatch(
-    kernel: Kernel,
+    kernel: ResolvedKernel,
     bindings: Record<string, unknown>,
     passThreads?:
         | number
@@ -387,11 +390,9 @@ function getBindingCount(value: unknown, name: string): number {
                 `  Hint: Specify threads explicitly in the Kernel options.`
         );
     }
-    if (isHandle(value)) {
+    if (isDispatchHandle(value)) {
         // Walk up the Handle chain to find the backing Buffer's count
-        const source = (value as Handle)._node._bindings[
-            (value as Handle)._name
-        ];
+        const source = value._node._bindings[value._name];
         return getBindingCount(source, name);
     }
     throw new Error(

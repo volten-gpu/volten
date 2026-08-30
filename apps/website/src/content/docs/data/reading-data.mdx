@@ -23,7 +23,6 @@ Primitive buffers return typed arrays when Volten can infer the right type:
 const values = new Buffer([1, 2, 3, 4], 'f32', 'rw');
 
 v.run(node);
-
 const result = await v.read(values);
 // Float32Array
 ```
@@ -56,18 +55,16 @@ const bytes = await v.read(rawBuffer);
 Reading a node returns a record of its declared outputs.
 
 ```ts
-const kernel = new Kernel(
-    `
+const doubleValues = kernel({
+    shader: `
       fn main(gid: vec3u) {
         result[gid.x] = input[gid.x] * 2.0;
       }
     `,
-    {
-        outputs: ['result']
-    }
-);
+    outputs: ['result']
+});
 
-const node = v.pass(kernel, { input, result });
+const node = doubleValues({ input, result });
 v.run(node);
 
 const outputs = await v.read(node);

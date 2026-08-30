@@ -3,7 +3,8 @@ import {
     Buffer,
     RawBuffer,
     Uniform,
-    Kernel,
+    kernel,
+    plan,
     struct,
     array
 } from '@volten/core';
@@ -14,7 +15,8 @@ import {
     Buffer,
     RawBuffer,
     Uniform,
-    Kernel,
+    kernel,
+    plan,
     struct,
     array
 };

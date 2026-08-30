@@ -1,0 +1,49 @@
+---
+title: Connect Work with Handles
+description: Schedule a dependent chain by passing one node's output handle to the next.
+---
+
+Passing a node handle into another node creates a graph dependency. You only
+need to run the final node; Volten follows the handles and schedules its
+producers first.
+
+```ts
+import { volten, Buffer, kernel } from '@volten/core';
+
+const v = await volten();
+const input = new Buffer([1, 2, 3, 4], 'f32', 'r');
+const doubled = new Buffer([0, 0, 0, 0], 'f32', 'rw');
+const output = new Buffer([0, 0, 0, 0], 'f32', 'rw');
+
+const doubleValues = kernel({
+    shader: `
+  fn main(gid: vec3u) {
+    output[gid.x] = input[gid.x] * 2.0;
+  }
+`,
+    threads: 'input'
+});
+
+const addTen = kernel({
+    shader: `
+  fn main(gid: vec3u) {
+    output[gid.x] = input[gid.x] + 10.0;
+  }
+`,
+    threads: 'input'
+});
+
+const A = doubleValues({ input, output: doubled });
+const B = addTen({ input: A.output, output });
+
+v.run(B);
+
+console.log(await v.read(B.output));
+// Float32Array [12, 14, 16, 18]
+```
+
+`A.output` refers to the `doubled` buffer and records that `A` produces it.
+Because `B` consumes that handle, `v.run(B)` schedules `A` before `B`. There is
+no need to run both nodes explicitly or manually synchronize between them.
+
+Learn more: [Nodes and Handles](/execution/nodes-and-handles/), [v.run()](/execution/run/).

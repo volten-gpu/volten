@@ -1,0 +1,76 @@
+---
+title: Invoking Operations
+description: Connect a callable kernel or plan to its data.
+---
+
+Both `kernel()` and `plan()` define callable operations. Calling an operation
+with its bindings creates a context-free node:
+
+```ts
+const scale = kernel({
+    shader: `fn main(gid: vec3u) {
+        output[gid.x] = input[gid.x] * 2.0;
+    }`,
+    threads: 'input'
+});
+
+const node = scale({ input, output });
+```
+
+Operation invocation does not access WebGPU or submit work. The node is
+materialized for a device when it reaches `v.run()`, `v.wait()`, or a read.
+
+## Signature
+
+```ts
+const node = operation(bindings, options);
+```
+
+| Argument   | Meaning                                              |
+| ---------- | ---------------------------------------------------- |
+| `bindings` | `Buffer`, `RawBuffer`, `Uniform`, or `Handle` values |
+| `options`  | Optional invocation-level overrides                  |
+
+```ts
+const node = scale(
+    { input, output },
+    { label: 'scale node', threads: input.count }
+);
+```
+
+`debug` enables shader debugging for a primitive kernel invocation:
+
+```ts
+const node = scale({ input, output }, { debug: true });
+```
+
+## Plans
+
+`plan()` defines an operation that can build several kernel nodes after a
+Volten context is known. Its output names come from the returned handle map:
+
+```ts
+const reduce = plan((context, inputs) => {
+    const A = reduceStep({ input: inputs.input, output: tempA });
+    const B = reduceStep({ input: A.output, output: tempB });
+
+    return { result: B.output };
+});
+
+const A = reduce({ input });
+const B = consume({ input: A.result, output });
+```
+
+The builder runs once, during materialization. Every branch represented by a
+returned handle belongs to the plan invocation and is scheduled together. A
+builder that returns no handles schedules no work.
+
+The order of properties in the returned object is not an execution order.
+Connect kernels through handles whenever one must wait for another:
+
+```ts
+const A = update({ data: inputs.data });
+const B = update({ data: A.data });
+
+return { data: B.data };
+```

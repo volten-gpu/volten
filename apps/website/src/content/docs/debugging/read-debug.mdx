@@ -6,10 +6,8 @@ description: Read and inspect shader debug output.
 Use `v.readDebug(node)` after running a debug-enabled node.
 
 ```ts
-const node = v.pass(kernel, bindings, { debug: true });
-
+const node = debugOperation(bindings, { debug: true });
 v.run(node);
-
 const result = await v.readDebug(node);
 ```
 
@@ -41,12 +39,12 @@ for (const log of result.logs) {
 
 Each log has:
 
-| Field | Meaning |
-| --- | --- |
-| `gid` | Invocation id as `[x, y, z]` |
-| `kind` | Logged value kind, such as `f32` or `vec4f` |
-| `message` | Optional message from the shader |
-| `value` | Number or number array |
+| Field     | Meaning                                     |
+| --------- | ------------------------------------------- |
+| `gid`     | Invocation id as `[x, y, z]`                |
+| `kind`    | Logged value kind, such as `f32` or `vec4f` |
+| `message` | Optional message from the shader            |
+| `value`   | Number or number array                      |
 
 ## Buffer Size
 
@@ -55,7 +53,7 @@ Debug records are stored in a hidden debug buffer. The default payload size is `
 Increase it when you expect more logs.
 
 ```ts
-const node = v.pass(kernel, bindings, {
+const node = debugOperation(bindings, {
     debug: { bufferSize: 64 * 1024 }
 });
 ```
@@ -72,12 +70,12 @@ if (result.dropped > 0 || result.truncated) {
 }
 ```
 
-| Field | Meaning |
-| --- | --- |
-| `dropped` | Records the shader tried to write after the buffer was full |
-| `usedWords` | Number of 32-bit words used by written records |
-| `truncated` | The recorded cursor moved past the available payload |
-| `bufferSize` | Debug payload size in bytes |
+| Field        | Meaning                                                     |
+| ------------ | ----------------------------------------------------------- |
+| `dropped`    | Records the shader tried to write after the buffer was full |
+| `usedWords`  | Number of 32-bit words used by written records              |
+| `truncated`  | The recorded cursor moved past the available payload        |
+| `bufferSize` | Debug payload size in bytes                                 |
 
 :::note[Debug output vs data output]
 `v.readDebug()` reads only debug logs. Use `v.read()` to read buffers, node outputs, or handles.

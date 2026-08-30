@@ -15,8 +15,8 @@ npm pack --dry-run
 `@volten/core` declares `"sideEffects": false` for bundlers. Keep package
 imports inert: source files may define and export values at module load time,
 but WebGPU work, environment access, global mutation, logging, and async startup
-must stay behind explicit user calls such as `volten()`, `v.pass()`, or
-`v.run()`.
+must stay behind explicit user calls such as `volten()`, operation invocation,
+or `v.run()`.
 
 Additional checklist:
 
@@ -29,6 +29,6 @@ Additional checklist:
 ## Create Tag
 
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```

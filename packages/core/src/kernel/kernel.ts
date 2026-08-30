@@ -1,243 +1,326 @@
-// Kernel class
-// Stores shader source code, output declarations, and thread configuration
-
+import {
+    createLogicalNode,
+    type Bindings,
+    type HandlesForBindings,
+    type InvocationOptions,
+    type Node,
+    type Handle
+} from '../graph/node.js';
+import type {
+    OperationContext,
+    OperationDefinition
+} from '../graph/operation.js';
 import { makeLabel } from '../utils/labels.js';
 
 const BARRIER_USAGE_REGEX = /\b(?:workgroupBarrier|storageBarrier)\s*\(/;
 
-/** Output size specification for future auto-allocation metadata. */
+/**
+ * Output element-count metadata.
+ *
+ * A fixed number describes a statically sized output. A function can derive
+ * the size from the bindings supplied when the callable kernel is invoked.
+ * This is retained as allocation metadata; callers currently still provide
+ * the concrete output buffer themselves.
+ */
 export type OutputSize = number | ((data: Record<string, unknown>) => number);
 
-/** Configuration for a single output */
+/** Declarative metadata for one named kernel output. */
 export interface OutputConfig {
     /**
-     * Infer type (and optionally size) from another binding.
-     * The named binding's wgslType and element count are copied.
-     * Resolved at v.pass() time when actual bindings are known.
+     * Binding whose type and element count describe this output.
+     * Explicit `type` and `size` values take precedence over the corresponding
+     * values implied by `definedBy`.
      */
     definedBy?: string;
 
-    /**
-     * Explicit WGSL type override (e.g. "array<vec3f>").
-     * Takes precedence over definedBy for type.
-     */
+    /** Explicit WGSL type, for example `array<vec3f>`. */
     type?: string;
 
     /**
-     * Output size specification (element count).
-     * Takes precedence over definedBy for size.
-     * - number: Fixed size
-     * - function: Dynamic size based on pass-time inputs
+     * Explicit output element count, either fixed or derived from invocation
+     * bindings. This overrides the count implied by `definedBy`.
      */
     size?: OutputSize;
 }
 
 /**
- * Output declarations.
+ * Declares the public outputs of a kernel.
  *
- * - string[]: semantic output names only. Useful when users provide buffers.
- * - Record<string, OutputConfig>: output names plus optional shape metadata.
+ * Use an array when only the binding names matter:
+ *
+ *     outputs: ['result', 'debug']
+ *
+ * Use an object when an output also carries shape metadata:
+ *
+ *     outputs: {
+ *         result: { definedBy: 'input' },
+ *         total: { type: 'array<f32>', size: 1 }
+ *     }
+ *
+ * In both forms, every name must match a buffer-like invocation binding.
+ * Declared names determine whole-node readback and are excluded when Volten
+ * looks for an input buffer from which to infer a thread count.
  */
 export type OutputsSpec = readonly string[] | Record<string, OutputConfig>;
 
 /**
- * Specifies how many GPU threads to launch for a kernel.
+ * Describes the total logical invocations launched by a kernel.
  *
- * All forms express total invocations. Volten divides each axis by
- * the corresponding workgroup dimension (with ceil) to compute dispatch size.
+ * - `number`: fixed 1D count, equivalent to `[count, 1, 1]`.
+ * - `string`: infer the 1D count from the named Buffer binding.
+ * - `function`: derive a 1D, 2D, or 3D count from invocation bindings.
  *
- * - **number:** 1D invocation count, equivalent to [N, 1, 1].
- * - **[x, y] or [x, y, z]:** Per-axis invocation counts.
- * - **string:** Name of a binding whose element count determines the count (1D).
- * - **function:** Dynamic — return number, [x,y], or [x,y,z].
+ * These are invocation counts, not workgroup counts. Volten divides each axis
+ * by `workgroupSize` with `ceil` to obtain the WebGPU dispatch dimensions.
  *
  * @example
- * threads: 1024                           // → dispatch [ceil(1024/wgX), 1, 1]
- * threads: [512, 512]                     // → dispatch [ceil(512/wgX), ceil(512/wgY), 1]
- * threads: 'input'                        // → infer count from binding named "input"
- * threads: (data) => data.input.count     // → dynamic 1D
+ * ```ts
+ * threads: 1024
+ * threads: 'input'
+ * threads: ({ image }) => [image.width, image.height]
+ * ```
  */
 export type ThreadsSpec =
-    | number // Simple 1D count
-    | string // Infer from named input
+    | number
+    | string
     | ((
           data: Record<string, unknown>
-      ) => number | [number, number] | [number, number, number]); // Dynamic
+      ) => number | [number, number] | [number, number, number]);
 
 /**
- * Options for Kernel creation
+ * WGSL source selected either statically or once a GPU context is available.
+ * A selector is evaluated during materialization, not while authoring the
+ * logical graph, so it may safely inspect device features and limits.
  */
-export interface KernelOptions {
-    /** Optional human-friendly label for debugger/devtools usage. */
+export type KernelShader = string | ((context: OperationContext) => string);
+
+/** Declarative input accepted by `kernel()`. */
+export interface KernelConfig {
+    /** WGSL kernel source, or a context-dependent source selector. */
+    shader: KernelShader;
+
+    /** Optional human-friendly label used by diagnostics and GPU tooling. */
     label?: string;
 
     /**
-     * Output declarations for node readback and future auto-allocation metadata.
-     *
-     * Record<string, OutputConfig>: declarative output description with
-     * definedBy / type / size fields.
-     *
-     * @example
-     * ```ts
-     * outputs: {
-     *   output: { definedBy: 'input' },        // copy type & size from "input"
-     *   result: { type: 'array<f32>', size: 1 }, // explicit override
-     *   half:   { definedBy: 'input', size: (d) => (d.input as Buffer).count / 2 },
-     * }
-     * ```
+     * Binding names exposed as kernel outputs. Besides controlling whole-node
+     * readback, these names help distinguish outputs during thread inference.
      */
     outputs?: OutputsSpec;
 
     /**
-     * Workgroup size for the compute shader.
-     * Defaults to [64, 1, 1].
-     * ^ This default is not optimal for kernels that work in 2D spaces and
-     *   require frequent neighbor lookups like blur / stencil ops, I decided
-     *   however to keep this as an initial default and handle the optimal
-     *   workgroup size at the stdlib level, e.g. the author of a gaussianBlur
-     *   kernel should use the correct workgroup size for that type of kernel.
-     *   Workgroup size is a compile-time, algorithmic concern.
-     *   Dispatch dimensions are a runtime, data-shape concern
-     * The shader will have @workgroup_size(x, y, z) injected.
+     * Compile-time workgroup dimensions injected as
+     * `@workgroup_size(x, y, z)`. Missing axes default to `1`; the complete
+     * default is `[64, 1, 1]`.
+     *
+     * Workgroup size is an algorithmic choice: neighbor-heavy 2D kernels, for
+     * example, generally need a shape chosen for that algorithm. `threads`, by
+     * contrast, describes the runtime data shape to cover.
      */
     workgroupSize?: [number, number?, number?];
 
     /**
-     * Thread dispatch configuration.
-     * Controls how many total invocations to dispatch.
-     * - number: Fixed 1D dispatch count
-     * - string: Infer from the length of the named input buffer
-     * - function: Compute dynamically from pass-time inputs
-     *
-     * If omitted, Volten will attempt to infer from a single input.
+     * Total logical invocation count. If omitted, Volten infers it from the
+     * only unambiguous input Buffer; invocation options may override it.
      */
     threads?: ThreadsSpec;
 
     /**
-     * Opt out of Volten's hidden dispatch-bounds guard.
+     * Disable Volten's injected dispatch-bounds guard.
      *
-     * Use this for advanced kernels that manage bounds manually, or for
-     * workgroup-cooperative kernels where an injected early return would be
-     * inappropriate.
+     * Use this only when the WGSL performs its own bounds handling, or for
+     * workgroup-cooperative code where an injected early return would make
+     * barriers unsafe. The default is `false`.
      */
     unsafeManualBounds?: boolean;
 }
 
-/**
- * Normalized output format (internal use)
- */
+/** Options used by the concrete, already-resolved kernel representation. */
+export type KernelOptions = Omit<KernelConfig, 'shader'>;
+
+/** Object form used internally after either `OutputsSpec` form is normalized. */
 export interface NormalizedOutput {
-    name: string;
-    definedBy?: string;
-    type?: string;
-    size?: OutputSize;
+    readonly name: string;
+    readonly definedBy?: string;
+    readonly type?: string;
+    readonly size?: OutputSize;
 }
 
 /**
- * Kernel class for compute shader definitions.
- *
- * Handles:
- * - Builtin shorthand expansion (gid, lid, wid, lid3, nwg)
- * - Guarded entry-point generation by default
- * - @compute and @workgroup_size injection
- * - Output declarations with optional size specifications
- * - Thread dispatch configuration
- *
- * @example
- * ```ts
- * // Simple kernel — no outputs needed for in-place work
- * const InPlace = new Kernel(`
- *   fn main(gid: vec3<u32>) {
- *     data[gid.x] *= 2.0;
- *   }
- * `);
- *
- * // Kernel with declarative output metadata
- * const BlurKernel = new Kernel(`...`, {
- *   outputs: { output: { definedBy: 'input' } },
- * });
- *
- * // Kernel with explicit output size (e.g., reduce)
- * const ReduceKernel = new Kernel(`...`, {
- *   outputs: { result: { type: 'array<f32>', size: 1 } },
- *   workgroupSize: [256],
- * });
- * ```
+ * Immutable kernel metadata retained by the callable operation.
+ * GPU-specific work deliberately does not happen here; shader selection,
+ * binding classification, and pipeline creation happen during v.run().
  */
-export class Kernel {
-    /** Human-friendly debug label */
+export class KernelDefinition {
     readonly label: string;
-
-    /** The original user-provided WGSL source */
-    readonly source: string;
-
-    /**
-     * Normalized output declarations, object form { name, definedBy?, type?, size? }
-     */
-    readonly outputs: NormalizedOutput[];
-
-    /** Workgroup size as [x, y, z] */
+    readonly shader: KernelShader;
+    readonly outputs: readonly NormalizedOutput[];
     readonly workgroupSize: [number, number, number];
-
-    /** Thread dispatch specification */
     readonly threads?: ThreadsSpec;
-
-    /** Whether the kernel source uses WGSL synchronization barriers. */
-    readonly usesBarrier: boolean;
-
-    /** Skip Volten's hidden dispatch-bounds guard and manage bounds manually. */
     readonly unsafeManualBounds: boolean;
 
-    constructor(source: string, options?: KernelOptions) {
-        this.label = makeLabel('Kernel', options?.label);
-        this.source = source;
-        this.outputs = this.normalizeOutputs(options?.outputs);
-        this.workgroupSize = this.normalizeWorkgroupSize(
-            options?.workgroupSize
-        );
-        this.threads = options?.threads;
-        this.usesBarrier = BARRIER_USAGE_REGEX.test(source);
-        this.unsafeManualBounds = options?.unsafeManualBounds ?? false;
+    constructor(config: KernelConfig) {
+        this.label = makeLabel('Kernel', config.label);
+        this.shader = config.shader;
+        this.outputs = normalizeOutputs(config.outputs);
+        this.workgroupSize = normalizeWorkgroupSize(config.workgroupSize);
+        this.threads = config.threads;
+        this.unsafeManualBounds = config.unsafeManualBounds ?? false;
     }
 
-    /**
-     * Get output names as a simple array
-     */
+    /** Names exposed by logical nodes and by whole-node readback. */
     get outputNames(): string[] {
-        return this.outputs.map((o) => o.name);
+        return this.outputs.map((output) => output.name);
     }
 
-    /**
-     * Normalize outputs from Record<string, OutputConfig> to NormalizedOutput[]
-     */
-    private normalizeOutputs(spec?: OutputsSpec): NormalizedOutput[] {
-        if (!spec) return [];
+    /** Select the shader and produce context-specific materialization data. */
+    resolve(context: OperationContext): ResolvedKernel {
+        const source =
+            typeof this.shader === 'function'
+                ? this.shader(context)
+                : this.shader;
 
-        if (Array.isArray(spec)) {
-            return spec.map((name) => ({
-                name,
-                definedBy: undefined,
-                type: undefined,
-                size: undefined
-            }));
-        }
+        return {
+            label: this.label,
+            source,
+            outputs: this.outputs,
+            outputNames: this.outputNames,
+            workgroupSize: this.workgroupSize,
+            threads: this.threads,
+            usesBarrier: BARRIER_USAGE_REGEX.test(source),
+            unsafeManualBounds: this.unsafeManualBounds
+        };
+    }
+}
 
-        return Object.entries(spec).map(([name, config]) => ({
-            name,
-            definedBy: config.definedBy,
-            type: config.type,
-            size: config.size
-        }));
+/** Concrete kernel metadata used by the existing WGSL and dispatch pipeline. */
+export interface ResolvedKernel {
+    /** Human-friendly label retained from the definition. */
+    readonly label: string;
+    /** Concrete WGSL selected for this GPU context. */
+    readonly source: string;
+    /** Normalized output declarations. */
+    readonly outputs: readonly NormalizedOutput[];
+    /** Output binding names in declaration order. */
+    readonly outputNames: readonly string[];
+    /** Fully normalized `[x, y, z]` workgroup dimensions. */
+    readonly workgroupSize: [number, number, number];
+    /** Kernel-level logical invocation rule, before invocation overrides. */
+    readonly threads?: ThreadsSpec;
+    /** Whether the selected WGSL contains a synchronization barrier call. */
+    readonly usesBarrier: boolean;
+    /** Whether Volten must leave bounds handling entirely to the WGSL. */
+    readonly unsafeManualBounds: boolean;
+}
+
+/**
+ * Concrete kernel metadata consumed by WGSL helpers and physical dispatches.
+ * The public authoring API is kernel({ shader, ... }); this class remains an
+ * internal value object for code that already has a resolved shader string.
+ */
+export class Kernel implements ResolvedKernel {
+    readonly label: string;
+    readonly source: string;
+    readonly outputs: readonly NormalizedOutput[];
+    readonly workgroupSize: [number, number, number];
+    readonly threads?: ThreadsSpec;
+    readonly usesBarrier: boolean;
+    readonly unsafeManualBounds: boolean;
+
+    constructor(source: string, options: KernelOptions = {}) {
+        this.label = makeLabel('Kernel', options.label);
+        this.source = source;
+        this.outputs = normalizeOutputs(options.outputs);
+        this.workgroupSize = normalizeWorkgroupSize(options.workgroupSize);
+        this.threads = options.threads;
+        this.usesBarrier = BARRIER_USAGE_REGEX.test(source);
+        this.unsafeManualBounds = options.unsafeManualBounds ?? false;
     }
 
-    /**
-     * Normalize workgroup size to [x, y, z] format
-     */
-    private normalizeWorkgroupSize(
-        spec?: [number, number?, number?]
-    ): [number, number, number] {
-        if (!spec) return [64, 1, 1];
-        const [x, y = 1, z = 1] = spec;
-        return [x, y, z];
+    get outputNames(): string[] {
+        return this.outputs.map((output) => output.name);
     }
+}
+
+type OutputNames<TConfig extends KernelConfig> =
+    TConfig['outputs'] extends readonly (infer TName extends string)[]
+        ? TName
+        : TConfig['outputs'] extends Record<string, OutputConfig>
+          ? keyof TConfig['outputs'] & string
+          : never;
+
+type KernelNode<TBindings extends Bindings, TOutput extends string> = Node<
+    HandlesForBindings<TBindings> & Record<TOutput, Handle>
+>;
+
+export interface KernelOperation<
+    TOutput extends string = never
+> extends OperationDefinition {
+    readonly _kind: 'kernel';
+    readonly _definition: KernelDefinition;
+    readonly outputNames: readonly TOutput[];
+
+    <TBindings extends Bindings>(
+        bindings: TBindings,
+        options?: InvocationOptions
+    ): KernelNode<TBindings, TOutput>;
+}
+
+/**
+ * Defines a callable primitive GPU operation.
+ *
+ * Calling the returned function only records bindings in a logical node:
+ *
+ *     const add = kernel({ shader: `...`, threads: 'lhs' });
+ *     const A = add({ lhs, rhs, result });
+ *
+ * The shader may inspect the eventual device through OperationContext, but it
+ * is not evaluated until A is materialized by a Volten context.
+ */
+export function kernel<const TConfig extends KernelConfig>(
+    config: TConfig
+): KernelOperation<OutputNames<TConfig>> {
+    const definition = new KernelDefinition(config);
+
+    const operation = ((bindings: Bindings, options?: InvocationOptions) =>
+        createLogicalNode(operation, bindings, options)) as KernelOperation<
+        OutputNames<TConfig>
+    >;
+
+    Object.defineProperties(operation, {
+        _kind: { value: 'kernel' },
+        _definition: { value: definition },
+        label: { value: definition.label },
+        outputNames: { value: definition.outputNames }
+    });
+
+    return operation;
+}
+
+export function isKernelOperation(
+    operation: OperationDefinition
+): operation is KernelOperation<string> {
+    return operation._kind === 'kernel';
+}
+
+function normalizeOutputs(spec?: OutputsSpec): readonly NormalizedOutput[] {
+    if (!spec) return [];
+    if (Array.isArray(spec)) {
+        return spec.map((name) => ({ name }));
+    }
+    return Object.entries(spec).map(([name, config]) => ({
+        name,
+        definedBy: config.definedBy,
+        type: config.type,
+        size: config.size
+    }));
+}
+
+/** Expand omitted workgroup axes and apply Volten's 1D default. */
+function normalizeWorkgroupSize(
+    spec?: [number, number?, number?]
+): [number, number, number] {
+    if (!spec) return [64, 1, 1];
+    const [x, y = 1, z = 1] = spec;
+    return [x, y, z];
 }

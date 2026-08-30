@@ -3,10 +3,10 @@ title: Nodes and Handles
 description: Pass data from one node into another.
 ---
 
-A node is the value returned by `v.pass()`.
+A node is the value returned by invoking a callable kernel or plan.
 
 ```ts
-const A = v.pass(kernel, { input, output });
+const A = copyValues({ input, output });
 ```
 
 Every buffer-like binding on a node gets a handle with the same name.
@@ -16,13 +16,12 @@ A.input;
 A.output;
 ```
 
-You can use handles when one pass consumes data from another pass,
+You can use handles when one node consumes data from another node,
 to make the dependency requirement clear:
 
 ```ts
-const A = v.pass(doubleKernel, { input, output: mid });
-const B = v.pass(offsetKernel, { input: A.output, output: result });
-
+const A = doubleKernel({ input, output: mid });
+const B = offsetKernel({ input: A.output, output: result });
 v.run(B);
 ```
 
@@ -35,10 +34,9 @@ This is Volten's graph model: handles connect nodes into a dependency graph, and
 Handles are created for in-place bindings too.
 
 ```ts
-const A = v.pass(kernel, { data });
-const B = v.pass(kernel, { data: A.data });
-const C = v.pass(kernel, { data: B.data });
-
+const A = updateInPlace({ data });
+const B = updateInPlace({ data: A.data });
+const C = updateInPlace({ data: B.data });
 v.run(C);
 ```
 
@@ -50,11 +48,11 @@ well as letting you created more complex GPU compute execution dependency graphs
 Declared outputs matter when reading a node.
 
 ```ts
-const kernel = new Kernel(`...`, {
+const computeResult = kernel({
+    shader: `...`,
     outputs: ['result']
 });
-
-const node = v.pass(kernel, { input, result });
+const node = computeResult({ input, result });
 const output = await v.read(node);
 ```
 
