@@ -19,9 +19,10 @@ const consumerDir = join(tempDir, 'consumer');
 
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const node = process.execPath;
-const tsc = process.platform === 'win32'
-    ? join(rootDir, 'node_modules', '.bin', 'tsc.cmd')
-    : join(rootDir, 'node_modules', '.bin', 'tsc');
+const tsc =
+    process.platform === 'win32'
+        ? join(rootDir, 'node_modules', '.bin', 'tsc.cmd')
+        : join(rootDir, 'node_modules', '.bin', 'tsc');
 
 function run(command, args, options = {}) {
     execFileSync(command, args, {
@@ -72,7 +73,7 @@ try {
         join(consumerDir, 'runtime-smoke.mjs'),
         `
 const mod = await import('@volten/core');
-const expected = ['volten', 'Buffer', 'RawBuffer', 'Uniform', 'Kernel', 'struct', 'array', 'unpack'];
+const expected = ['volten', 'Buffer', 'RawBuffer', 'Uniform', 'kernel', 'plan', 'struct', 'array', 'unpack'];
 const missing = expected.filter((name) => !(name in mod));
 
 if (missing.length > 0) {
@@ -109,9 +110,13 @@ if (missing.length > 0) {
         `
 import {
     Buffer,
-    Kernel,
+    kernel,
+    plan,
     RawBuffer,
     Uniform,
+    type InvocationOptions,
+    type KernelConfig,
+    type OperationContext,
     type ReadTarget,
     type VoltenOptions
 } from '@volten/core';
@@ -119,12 +124,24 @@ import {
 const options: VoltenOptions = {};
 const maybeDevice: GPUDevice | undefined = options.device;
 const target: ReadTarget | undefined = undefined;
+const invocationOptions: InvocationOptions = { label: 'smoke node' };
 const buffer = new Buffer([1, 2, 3], 'f32');
 const raw = new RawBuffer(new Uint32Array([1]).buffer, 'array<u32>');
 const uniform = new Uniform(1, 'f32');
-const kernel = new Kernel('fn main(gid: vec3u) {}', { threads: 1 });
+const config: KernelConfig = {
+    shader: 'fn main(gid: vec3u) {}',
+    threads: 1
+};
+const operation = kernel(config);
+const node = operation({ buffer }, invocationOptions);
+const composed = plan((context: OperationContext, inputs: { buffer: Buffer }) => {
+    void context.device;
+    const step = operation({ buffer: inputs.buffer });
+    return { result: step.buffer };
+});
+const planNode = composed({ buffer });
 
-void [maybeDevice, target, buffer, raw, uniform, kernel];
+void [maybeDevice, target, buffer, raw, uniform, node, planNode];
 `
     );
 
