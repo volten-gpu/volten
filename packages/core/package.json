@@ -53,7 +53,7 @@
     "check-types:file": "tsc --noEmit --pretty false > tsc_output.txt 2>&1 || type tsc_output.txt"
   },
   "dependencies": {
-    "@webgpu/types": "^0.1.70"
+    "@webgpu/types": "^0.1.72"
   },
   "devDependencies": {
     "@repo/eslint-config": "workspace:*",
